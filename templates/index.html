@@ -1,0 +1,20 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="container mt-5">
+  <h2>EEG Preprocessing Pipeline</h2>
+  <form method="post" enctype="multipart/form-data">
+    <div class="form-group">
+      <label for="file">Upload EEG file (.edf or .fif):</label>
+      <input type="file" class="form-control-file" id="file" name="file" accept=".edf,.fif" required>
+    </div>
+    <button type="submit" class="btn btn-primary mt-2">Upload & Preprocess</button>
+  </form>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <div class="alert alert-warning mt-3">
+        {{ messages[0] }}
+      </div>
+    {% endif %}
+  {% endwith %}
+</div>
+{% endblock %}
