@@ -9,6 +9,7 @@ output_folder = fullfile(pwd, 'output');
 log_folder = fullfile(pwd, 'logs');
 
 % Create folders if they don't exist
+if ~exist("input_folder", 'dir'), mkdir(input_folder); end
 if ~exist(output_folder, 'dir'), mkdir(output_folder); end
 if ~exist(log_folder, 'dir'), mkdir(log_folder); end
 
@@ -17,6 +18,20 @@ cnt_files = dir(fullfile(input_folder, '*.cnt'));
 edf_files = dir(fullfile(input_folder, '*.edf'));
 gdf_files = dir(fullfile(input_folder, '*.gdf'));
 eeg_files = [cnt_files; edf_files; gdf_files];
+
+% Check if any EEG files were found
+if isempty(eeg_files)
+    fprintf('\nERROR: No EEG files found in %s\n', input_folder);
+    fprintf('Expected file types: .cnt, .edf, .gdf\n');
+    fprintf('Please add EEG files to the input folder and run again.\n\n');
+    return;
+end
+
+fprintf('Found %d EEG file(s) to process:\n', length(eeg_files));
+for i = 1:length(eeg_files)
+    fprintf('  %d. %s\n', i, eeg_files(i).name);
+end
+fprintf('\n');
 
 % Start EEGLAB
 [ALLEEG, EEG, CURRENTSET, ALLCOM] = eeglab;
