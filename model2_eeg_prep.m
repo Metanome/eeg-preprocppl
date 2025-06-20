@@ -9,7 +9,7 @@ output_folder = fullfile(pwd, 'output');
 log_folder = fullfile(pwd, 'logs');
 
 % Create folders if they don't exist
-if ~exist("input_folder", 'dir'), mkdir(input_folder); end
+if ~exist(input_folder, 'dir'), mkdir(input_folder); end
 if ~exist(output_folder, 'dir'), mkdir(output_folder); end
 if ~exist(log_folder, 'dir'), mkdir(log_folder); end
 
