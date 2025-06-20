@@ -1,0 +1,27 @@
+# MATLAB files
+*.asv
+*.mat
+*.fig
+*.slx.autosave
+
+# EEG data files (these are typically large)
+*.cnt
+*.edf
+*.gdf
+*.bdf
+*.set
+*.fdt
+
+# Output folders
+output/
+logs/
+eeg_files/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+eIcon?
+Thumbs.db
