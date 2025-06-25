@@ -1,6 +1,21 @@
 % USER CONFIGURATION
 % Required: Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz
-% Remove: A1, A2 (reference channels), veog (vertical EOG if present)
+%
+% CHANNEL REMOVAL CONFIGURATION
+% =================================
+% Configure which types of channels to remove automatically
+REMOVE_REFERENCE_CHANNELS = true;    % Remove reference electrodes (A1, A2, M1, M2, etc.)
+REMOVE_EOG_CHANNELS = true;          % Remove EOG channels (VEOG, HEOG, EOG1, EOG2, etc.)
+REMOVE_EMG_CHANNELS = false;         % Remove EMG channels (EMG, Chin, etc.)
+REMOVE_ECG_CHANNELS = false;         % Remove ECG/EKG channels
+
+% Manual channel specification (use exact channel names from your data)
+MANUAL_CHANNELS_TO_REMOVE = {};      % e.g., {'BadChannel1', 'Artifact2'}
+
+% Safety: Channels that should NEVER be removed (protection list)
+CHANNELS_TO_NEVER_REMOVE = {'Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', ...
+                            'O1', 'O2', 'F7', 'F8', 'T3', 'T4', 'T5', 'T6', ...
+                            'Fz', 'Cz', 'Pz', 'Oz'};
 
 input_folder = fullfile(pwd, 'eeg_files');
 output_folder = fullfile(pwd, 'output');
@@ -74,9 +89,9 @@ for i = 1:length(eeg_files)
     
     % Smart logging: single file gets individual log, multiple files get batch log
     if length(eeg_files) == 1
-        log_file = fullfile(log_folder, [name_no_ext '_log.txt']);
+        log_file = fullfile(log_folder, [name_no_ext '_model2_log.txt']);
     else
-        log_file = fullfile(log_folder, 'Batch_log.txt');
+        log_file = fullfile(log_folder, 'Batch_model2_log.txt');
     end
     
     % Open log file (append mode for batch, write mode for single file)
@@ -149,12 +164,72 @@ for i = 1:length(eeg_files)
         continue;
     end
     
-    %% Step 2: Remove reference and unwanted channels if present
+    %% Step 2: Remove unwanted channels (configurable)
     step_start = tic;
-    % Standard channels to remove: A1, A2 (reference channels)
-    % Optional channels to remove: veog (vertical EOG if present)
-    channels_to_remove = {'A1', 'A2', 'veog', 'VEOG'};    
-    toRemove = intersect({EEG.chanlocs.labels}, channels_to_remove);
+    
+    % Build comprehensive list of channels to potentially remove
+    channels_to_remove = {};
+    
+    % Reference channels (various naming conventions)
+    if REMOVE_REFERENCE_CHANNELS
+        ref_channels = {'A1', 'A2', 'M1', 'M2', 'TP9', 'TP10', 'REF', 'Ref', 'ref', ...
+                       'LM', 'RM', 'LEFT_EAR', 'RIGHT_EAR', 'LE', 'RE'};
+        channels_to_remove = [channels_to_remove, ref_channels];
+    end
+    
+    % EOG channels (various naming conventions)
+    if REMOVE_EOG_CHANNELS
+        eog_channels = {'VEOG', 'veog', 'HEOG', 'heog', 'EOG1', 'EOG2', 'EOG', 'eog', ...
+                       'EOGH', 'EOGV', 'LEOG', 'REOG', 'UPEOG', 'LOWEOG', 'vEOG', 'hEOG', ...
+                       'EOG_L', 'EOG_R', 'EOG_U', 'EOG_D', 'VEOG+', 'VEOG-', 'HEOG+', 'HEOG-'};
+        channels_to_remove = [channels_to_remove, eog_channels];
+    end
+    
+    % EMG channels
+    if REMOVE_EMG_CHANNELS
+        emg_channels = {'EMG', 'emg', 'EMG1', 'EMG2', 'Chin', 'chin', 'CHIN', ...
+                       'EMG_CHIN', 'EMG_L', 'EMG_R', 'EMG_LT', 'EMG_RT'};
+        channels_to_remove = [channels_to_remove, emg_channels];
+    end
+    
+    % ECG channels
+    if REMOVE_ECG_CHANNELS
+        ecg_channels = {'ECG', 'ecg', 'EKG', 'ekg', 'ECG1', 'ECG2', 'HEART', 'heart', ...
+                       'ECG_L', 'ECG_R', 'EKG1', 'EKG2', 'CARD'};
+        channels_to_remove = [channels_to_remove, ecg_channels];
+    end
+    
+    % Add manual channels
+    channels_to_remove = [channels_to_remove, MANUAL_CHANNELS_TO_REMOVE];
+    
+    % Get available channels in the data
+    available_channels = {EEG.chanlocs.labels};
+    
+    % Find channels that actually exist in the data and should be removed
+    toRemove = intersect(available_channels, channels_to_remove);
+    
+    % Apply safety filter: remove any protected channels from removal list
+    if ~isempty(CHANNELS_TO_NEVER_REMOVE)
+        protected_found = intersect(toRemove, CHANNELS_TO_NEVER_REMOVE);
+        if ~isempty(protected_found)
+            fprintf(logID, '  SAFETY: Protected channels found in removal list: %s - keeping these channels\n', ...
+                strjoin(protected_found, ', '));
+            toRemove = setdiff(toRemove, CHANNELS_TO_NEVER_REMOVE);
+        end
+    end
+    
+    % Log what was found and what will be removed
+    fprintf(logID, 'Channel removal configuration:\n');
+    fprintf(logID, '  Reference channels: %s, EOG channels: %s\n', ...
+        string(REMOVE_REFERENCE_CHANNELS), string(REMOVE_EOG_CHANNELS));
+    fprintf(logID, '  EMG channels: %s, ECG channels: %s\n', ...
+        string(REMOVE_EMG_CHANNELS), string(REMOVE_ECG_CHANNELS));
+    if ~isempty(MANUAL_CHANNELS_TO_REMOVE)
+        fprintf(logID, '  Manual removal list: %s\n', strjoin(MANUAL_CHANNELS_TO_REMOVE, ', '));
+    end
+    fprintf(logID, '  Available channels (%d): %s\n', length(available_channels), strjoin(available_channels, ', '));
+    
+    % Perform channel removal
     if ~isempty(toRemove)
         EEG = pop_select(EEG, 'nochannel', toRemove);
         step_time = toc(step_start);
@@ -162,7 +237,7 @@ for i = 1:length(eeg_files)
             strjoin(toRemove, ', '), EEG.nbchan, step_time);
     else
         step_time = toc(step_start);
-        fprintf(logID, 'Step 2 - No channels removed (A1/A2/VEOG not found, %.2fs)\n', step_time);
+        fprintf(logID, 'Step 2 - No channels removed (no matching channels found, %.2fs)\n', step_time);
     end    
     
     %% Step 3: Downsample to 125 Hz
@@ -216,10 +291,10 @@ for i = 1:length(eeg_files)
     step_start = tic;
     try
         EEG = eeg_checkset(EEG);
-        out_file = fullfile(output_folder, [name_no_ext '_preprocessed.edf']);
+        out_file = fullfile(output_folder, [name_no_ext '_model2_preprocessed.edf']);
         pop_writeeeg(EEG, out_file, 'TYPE', 'EDF');
         step_time = toc(step_start);
-        fprintf(logID, 'Step 7 - Saved preprocessed EDF: %s (%.2fs)\n', [name_no_ext '_preprocessed.edf'], step_time);
+        fprintf(logID, 'Step 7 - Saved preprocessed EDF: %s (%.2fs)\n', [name_no_ext '_model2_preprocessed.edf'], step_time);
         
         % Calculate total processing time and quality metrics
         total_processing_time = toc(file_start_time);
@@ -276,9 +351,9 @@ end
 
 % Show which log file was created
 if length(eeg_files) == 1
-    fprintf('\nLog file created: %s_log.txt\n', eeg_files(1).name(1:end-4));
+    fprintf('\nLog file created: %s_model2_log.txt\n', eeg_files(1).name(1:end-4));
 else
-    fprintf('\nBatch log file created: Batch_log.txt\n');
+    fprintf('\nBatch log file created: Batch_model2_log.txt\n');
 end
 
 fprintf('EDF files saved in: %s\nLogs saved in: %s\n', output_folder, log_folder);

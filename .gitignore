@@ -17,6 +17,12 @@ output/
 logs/
 eeg_files/
 
+# Comparison tool folders (keep structure but ignore data/results)
+compare_models/script/
+compare_models/manual/
+compare_models/results/
+compare_models/logs/
+
 # OS generated files
 .DS_Store
 .DS_Store?

@@ -1,21 +1,37 @@
 % EEG PREPROCESSING PIPELINE WITH ICA (Model 3)
 % ===============================================
 % Automated preprocessing pipeline including ICA artifact removal
-% Required: Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz
-% Remove: A1, A2 (reference channels), veog (vertical EOG if present)
+% Supports flexible channel montages: 19, 21, 25, 32, 64, 128 channels
+% Required: Standard EEG channels (Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz)
 %
 % PIPELINE STEPS:
 % 1. Import EEG data (0-180 sec)
-% 2. Remove reference channels (A1, A2) and VEOG
+% 2. Remove unwanted channels (configurable)
 % 3. Resample to 125 Hz
 % 4. Bandpass filter (0.5-40 Hz)
 % 5. Clean raw data (ASR artifact removal)
-% 6. Add channel locations (Standard 10-20)
+% 6. Add channel locations (Dynamic montage detection)
 % 7. Run ICA decomposition
 % 8. Classify components using ICLabel
 % 9. Remove artifact components (non-brain components)
 % 10. Re-reference to average
 % 11. Save as EDF
+
+%% CHANNEL REMOVAL CONFIGURATION
+% =================================
+% Configure which types of channels to remove automatically
+REMOVE_REFERENCE_CHANNELS = true;    % Remove reference electrodes (A1, A2, M1, M2, etc.)
+REMOVE_EOG_CHANNELS = true;          % Remove EOG channels (VEOG, HEOG, EOG1, EOG2, etc.)
+REMOVE_EMG_CHANNELS = false;         % Remove EMG channels (EMG, Chin, etc.)
+REMOVE_ECG_CHANNELS = false;         % Remove ECG/EKG channels
+
+% Manual channel specification (use exact channel names from your data)
+MANUAL_CHANNELS_TO_REMOVE = {};      % e.g., {'BadChannel1', 'Artifact2'}
+
+% Safety: Channels that should NEVER be removed (protection list)
+CHANNELS_TO_NEVER_REMOVE = {'Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', ...
+                            'O1', 'O2', 'F7', 'F8', 'T3', 'T4', 'T5', 'T6', ...
+                            'Fz', 'Cz', 'Pz', 'Oz'};
 
 input_folder = fullfile(pwd, 'eeg_files');
 output_folder = fullfile(pwd, 'output');
@@ -89,9 +105,9 @@ for i = 1:length(eeg_files)
     
     % Smart logging: single file gets individual log, multiple files get batch log
     if length(eeg_files) == 1
-        log_file = fullfile(log_folder, [name_no_ext '_log.txt']);
+        log_file = fullfile(log_folder, [name_no_ext '_model3_log.txt']);
     else
-        log_file = fullfile(log_folder, 'Batch_log.txt');
+        log_file = fullfile(log_folder, 'Batch_model3_log.txt');
     end
     
     % Open log file (append mode for batch, write mode for single file)
@@ -164,12 +180,72 @@ for i = 1:length(eeg_files)
         continue;
     end
     
-    %% Step 2: Remove reference and unwanted channels if present
+    %% Step 2: Remove unwanted channels (configurable)
     step_start = tic;
-    % Standard channels to remove: A1, A2 (reference channels)
-    % Optional channels to remove: veog (vertical EOG if present)
-    channels_to_remove = {'A1', 'A2', 'veog', 'VEOG'};    
-    toRemove = intersect({EEG.chanlocs.labels}, channels_to_remove);
+    
+    % Build comprehensive list of channels to potentially remove
+    channels_to_remove = {};
+    
+    % Reference channels (various naming conventions)
+    if REMOVE_REFERENCE_CHANNELS
+        ref_channels = {'A1', 'A2', 'M1', 'M2', 'TP9', 'TP10', 'REF', 'Ref', 'ref', ...
+                       'LM', 'RM', 'LEFT_EAR', 'RIGHT_EAR', 'LE', 'RE'};
+        channels_to_remove = [channels_to_remove, ref_channels];
+    end
+    
+    % EOG channels (various naming conventions)
+    if REMOVE_EOG_CHANNELS
+        eog_channels = {'VEOG', 'veog', 'HEOG', 'heog', 'EOG1', 'EOG2', 'EOG', 'eog', ...
+                       'EOGH', 'EOGV', 'LEOG', 'REOG', 'UPEOG', 'LOWEOG', 'vEOG', 'hEOG', ...
+                       'EOG_L', 'EOG_R', 'EOG_U', 'EOG_D', 'VEOG+', 'VEOG-', 'HEOG+', 'HEOG-'};
+        channels_to_remove = [channels_to_remove, eog_channels];
+    end
+    
+    % EMG channels
+    if REMOVE_EMG_CHANNELS
+        emg_channels = {'EMG', 'emg', 'EMG1', 'EMG2', 'Chin', 'chin', 'CHIN', ...
+                       'EMG_CHIN', 'EMG_L', 'EMG_R', 'EMG_LT', 'EMG_RT'};
+        channels_to_remove = [channels_to_remove, emg_channels];
+    end
+    
+    % ECG channels
+    if REMOVE_ECG_CHANNELS
+        ecg_channels = {'ECG', 'ecg', 'EKG', 'ekg', 'ECG1', 'ECG2', 'HEART', 'heart', ...
+                       'ECG_L', 'ECG_R', 'EKG1', 'EKG2', 'CARD'};
+        channels_to_remove = [channels_to_remove, ecg_channels];
+    end
+    
+    % Add manual channels
+    channels_to_remove = [channels_to_remove, MANUAL_CHANNELS_TO_REMOVE];
+    
+    % Get available channels in the data
+    available_channels = {EEG.chanlocs.labels};
+    
+    % Find channels that actually exist in the data and should be removed
+    toRemove = intersect(available_channels, channels_to_remove);
+    
+    % Apply safety filter: remove any protected channels from removal list
+    if ~isempty(CHANNELS_TO_NEVER_REMOVE)
+        protected_found = intersect(toRemove, CHANNELS_TO_NEVER_REMOVE);
+        if ~isempty(protected_found)
+            fprintf(logID, '  SAFETY: Protected channels found in removal list: %s - keeping these channels\n', ...
+                strjoin(protected_found, ', '));
+            toRemove = setdiff(toRemove, CHANNELS_TO_NEVER_REMOVE);
+        end
+    end
+    
+    % Log what was found and what will be removed
+    fprintf(logID, 'Channel removal configuration:\n');
+    fprintf(logID, '  Reference channels: %s, EOG channels: %s\n', ...
+        string(REMOVE_REFERENCE_CHANNELS), string(REMOVE_EOG_CHANNELS));
+    fprintf(logID, '  EMG channels: %s, ECG channels: %s\n', ...
+        string(REMOVE_EMG_CHANNELS), string(REMOVE_ECG_CHANNELS));
+    if ~isempty(MANUAL_CHANNELS_TO_REMOVE)
+        fprintf(logID, '  Manual removal list: %s\n', strjoin(MANUAL_CHANNELS_TO_REMOVE, ', '));
+    end
+    fprintf(logID, '  Available channels (%d): %s\n', length(available_channels), strjoin(available_channels, ', '));
+    
+    % Perform channel removal
     if ~isempty(toRemove)
         EEG = pop_select(EEG, 'nochannel', toRemove);
         step_time = toc(step_start);
@@ -177,7 +253,7 @@ for i = 1:length(eeg_files)
             strjoin(toRemove, ', '), EEG.nbchan, step_time);
     else
         step_time = toc(step_start);
-        fprintf(logID, 'Step 2 - No channels removed (A1/A2/VEOG not found, %.2fs)\n', step_time);
+        fprintf(logID, 'Step 2 - No channels removed (no matching channels found, %.2fs)\n', step_time);
     end    
     
     %% Step 3: Downsample to 125 Hz
@@ -216,38 +292,80 @@ for i = 1:length(eeg_files)
     fprintf(logID, 'Step 5 - Applied clean_rawdata (%d events after cleaning, %.1f%% data retained, %.2fs)\n', ...
         length(EEG.event), data_retention, step_time);    
         
-    %% Step 6: Add channel locations (Standard 10-20 Cap19)
+    %% Step 6: Add channel locations (Dynamic selection based on channel count)
     step_start = tic;
     channel_locations_added = false;
-    try
-        % Try the exact filename first
-        EEG = pop_chanedit(EEG, 'lookup', 'Standard-10-20-Cap19.ced');
-        channel_locations_added = true;
-        step_time = toc(step_start);
-        fprintf(logID, 'Step 6 - Added channel locations using Standard-10-20-Cap19.ced (%.2fs)\n', step_time);
-    catch ME1
+    
+    % Determine appropriate channel location file based on number of channels
+    num_channels = EEG.nbchan;
+    fprintf(logID, 'Detected %d channels, selecting appropriate channel location file...\n', num_channels);
+    
+    % Channel location file priority list based on channel count
+    if num_channels <= 19
+        chan_files = {'Standard-10-20-Cap19.ced'};
+        montage_type = '19-channel Standard 10-20';
+    elseif num_channels <= 21
+        chan_files = {'Standard-10-20-Cap21.ced', 'Standard-10-20-Cap19.ced'};
+        montage_type = '21-channel Standard 10-20';
+    elseif num_channels <= 25
+        chan_files = {'Standard-10-20-Cap25.ced', 'Standard-10-10-Cap25.ced', 'Standard-10-20-Cap21.ced'};
+        montage_type = '25-channel montage';
+    elseif num_channels <= 32
+        chan_files = {'Standard-10-20-Cap32.ced', 'Standard-10-10-Cap32.ced', 'Standard-10-20-Cap25.ced'};
+        montage_type = '32-channel montage';
+    elseif num_channels <= 64
+        chan_files = {'Standard-10-5-Cap64.ced', 'Standard-10-10-Cap64.ced', 'Standard-10-20-Cap32.ced'};
+        montage_type = '64-channel montage';
+    elseif num_channels <= 128
+        chan_files = {'Standard-10-5-Cap128.ced', 'Standard-10-5-Cap64.ced'};
+        montage_type = '128-channel montage';
+    else
+        chan_files = {'Standard-10-5-Cap128.ced'};
+        montage_type = 'high-density montage';
+    end
+    
+    % Try each channel location file in order of preference
+    for file_idx = 1:length(chan_files)
+        current_file = chan_files{file_idx};
         try
-            % Try full path construction as fallback
-            eeglab_path = which('eeglab');
-            if ~isempty(eeglab_path)
-                eeglab_dir = fileparts(eeglab_path);
-                chan_file = fullfile(eeglab_dir, 'functions', 'supportfiles', 'channel_location_files', 'eeglab', 'Standard-10-20-Cap19.ced');
-                if exist(chan_file, 'file')
-                    EEG = pop_chanedit(EEG, 'lookup', chan_file);
-                    channel_locations_added = true;
-                    step_time = toc(step_start);
-                    fprintf(logID, 'Step 6 - Added channel locations using full path Standard-10-20-Cap19.ced (%.2fs)\n', step_time);
-                else
-                    error('Standard-10-20-Cap19.ced not found');
-                end
-            else
-                error('EEGLAB path not found');
-            end
-        catch ME2
+            % Try direct lookup first
+            EEG = pop_chanedit(EEG, 'lookup', current_file);
+            channel_locations_added = true;
             step_time = toc(step_start);
-            fprintf(logID, 'Step 6 - WARNING: Could not add channel locations: %s (%.2fs)\n', ME1.message, step_time);
-            fprintf('[WARNING] Channel locations not added for %s: %s\n', filename, ME1.message);
+            fprintf(logID, 'Step 6 - Added channel locations using %s for %s (%.2fs)\n', current_file, montage_type, step_time);
+            break;
+        catch ME1
+            try
+                % Try full path construction as fallback
+                eeglab_path = which('eeglab');
+                if ~isempty(eeglab_path)
+                    eeglab_dir = fileparts(eeglab_path);
+                    chan_file_path = fullfile(eeglab_dir, 'functions', 'supportfiles', 'channel_location_files', 'eeglab', current_file);
+                    if exist(chan_file_path, 'file')
+                        EEG = pop_chanedit(EEG, 'lookup', chan_file_path);
+                        channel_locations_added = true;
+                        step_time = toc(step_start);
+                        fprintf(logID, 'Step 6 - Added channel locations using full path %s for %s (%.2fs)\n', current_file, montage_type, step_time);
+                        break;
+                    end
+                end
+            catch ME2
+                % Continue to next file
+            end
         end
+        
+        % Log attempt if not the last file
+        if file_idx < length(chan_files)
+            fprintf(logID, '  %s not found, trying next option...\n', current_file);
+        end
+    end
+    
+    % Final fallback and warning if no channel locations were added
+    if ~channel_locations_added
+        step_time = toc(step_start);
+        fprintf(logID, 'Step 6 - WARNING: Could not add channel locations for %d channels (%.2fs)\n', num_channels, step_time);
+        fprintf('[WARNING] Channel locations not added for %s (%d channels) - ICLabel may fail\n', filename, num_channels);
+        fprintf('[INFO] Available files searched: %s\n', strjoin(chan_files, ', '));
     end
     
     % Store initial PSD for before/after ICA comparison (after basic preprocessing)
@@ -400,10 +518,10 @@ for i = 1:length(eeg_files)
     step_start = tic;
     try
         EEG = eeg_checkset(EEG);
-        out_file = fullfile(output_folder, [name_no_ext '_preprocessed.edf']);
+        out_file = fullfile(output_folder, [name_no_ext '_model3_preprocessed.edf']);
         pop_writeeeg(EEG, out_file, 'TYPE', 'EDF');
         step_time = toc(step_start);
-        fprintf(logID, 'Step 11 - Saved preprocessed EDF: %s (%.2fs)\n', [name_no_ext '_preprocessed.edf'], step_time);
+        fprintf(logID, 'Step 11 - Saved preprocessed EDF: %s (%.2fs)\n', [name_no_ext '_model3_preprocessed.edf'], step_time);
         
         % Calculate total processing time and quality metrics
         total_processing_time = toc(file_start_time);
@@ -516,18 +634,39 @@ for i = 1:length(eeg_files)
         
         % 5. Component classification summary and ICA consistency metrics
         if exist('classifications', 'var')
-            % Count components based on dominant classification for consistency
-            [~, dominant_classes] = max(classifications, [], 2);
-            brain_components = sum(dominant_classes == 1);
-            muscle_components = sum(dominant_classes == 2);
-            eye_components = sum(dominant_classes == 3);
-            heart_components = sum(dominant_classes == 4);
-            line_noise_components = sum(dominant_classes == 5);
-            channel_noise_components = sum(dominant_classes == 6);
-            other_components = sum(dominant_classes == 7);
+            % Count ALL components by their dominant classification
+            total_components = size(classifications, 1);
+            [~, all_dominant_classes] = max(classifications, [], 2);
             
-            % Group non-brain artifacts for summary
+            % Create mask for retained components (not in removal list)
+            retained_mask = true(total_components, 1);
+            if ~isempty(components_removed)
+                retained_mask(components_removed) = false;
+            end
+            
+            % Count RETAINED components by dominant class
+            brain_components = sum(all_dominant_classes == 1 & retained_mask);
+            muscle_components = sum(all_dominant_classes == 2 & retained_mask);
+            eye_components = sum(all_dominant_classes == 3 & retained_mask);
+            heart_components = sum(all_dominant_classes == 4 & retained_mask);
+            line_noise_components = sum(all_dominant_classes == 5 & retained_mask);
+            channel_noise_components = sum(all_dominant_classes == 6 & retained_mask);
+            other_components = sum(all_dominant_classes == 7 & retained_mask);
+            
+            % Count REMOVED components by dominant class for detailed reporting
+            removed_brain = sum(all_dominant_classes == 1 & ~retained_mask);
+            removed_muscle = sum(all_dominant_classes == 2 & ~retained_mask);
+            removed_eye = sum(all_dominant_classes == 3 & ~retained_mask);
+            removed_heart = sum(all_dominant_classes == 4 & ~retained_mask);
+            removed_line_noise = sum(all_dominant_classes == 5 & ~retained_mask);
+            removed_channel_noise = sum(all_dominant_classes == 6 & ~retained_mask);
+            removed_other = sum(all_dominant_classes == 7 & ~retained_mask);
+            
+            % Group non-brain categories for summary display
             other_artifacts = heart_components + line_noise_components + channel_noise_components + other_components;
+            total_artifacts_removed = removed_muscle + removed_eye + removed_heart + ...
+                                    removed_line_noise + removed_channel_noise + ...
+                                    removed_other + removed_brain;
             
             % Classification consistency score (how confident ICLabel was)
             max_probs = max(classifications, [], 2);
@@ -549,6 +688,9 @@ for i = 1:length(eeg_files)
             heart_components = NaN; line_noise_components = NaN; channel_noise_components = NaN;
             other_components = NaN; other_artifacts = NaN; classification_confidence = NaN;
             brain_consistency = NaN; avg_component_entropy = NaN;
+            removed_brain = 0; removed_muscle = 0; removed_eye = 0; removed_heart = 0;
+            removed_line_noise = 0; removed_channel_noise = 0; removed_other = 0;
+            total_artifacts_removed = 0;
         end
         
         % Final summary with enhanced quality metrics
@@ -653,11 +795,15 @@ for i = 1:length(eeg_files)
         if ~isnan(classification_confidence)
             fprintf(logID, '  ICA Quality:\n');
             fprintf(logID, '    ICLabel confidence: %.1f%% (avg)\n', classification_confidence*100);
-            fprintf(logID, '    Component breakdown: Brain=%d, Muscle=%d, Eye=%d, Other=%d\n', ...
+            fprintf(logID, '    RETAINED components: Brain=%d, Muscle=%d, Eye=%d, Other=%d\n', ...
                 brain_components, muscle_components, eye_components, other_artifacts);
             if other_artifacts > 0
-                fprintf(logID, '    Other artifacts: Heart=%d, LineNoise=%d, ChannelNoise=%d, Other=%d\n', ...
+                fprintf(logID, '    RETAINED other artifacts: Heart=%d, LineNoise=%d, ChannelNoise=%d, Other=%d\n', ...
                     heart_components, line_noise_components, channel_noise_components, other_components);
+            end
+            if exist('total_artifacts_removed', 'var') && total_artifacts_removed > 0
+                fprintf(logID, '    REMOVED components: Brain=%d, Muscle=%d, Eye=%d, Heart=%d, LineNoise=%d, ChannelNoise=%d, Other=%d\n', ...
+                    removed_brain, removed_muscle, removed_eye, removed_heart, removed_line_noise, removed_channel_noise, removed_other);
             end
             if ~isnan(brain_consistency)
                 fprintf(logID, '    Brain component consistency: %.3f\n', brain_consistency);
@@ -702,9 +848,9 @@ end
 
 % Show which log file was created
 if length(eeg_files) == 1
-    fprintf('\nLog file created: %s_log.txt\n', eeg_files(1).name(1:end-4));
+    fprintf('\nLog file created: %s_model3_log.txt\n', eeg_files(1).name(1:end-4));
 else
-    fprintf('\nBatch log file created: Batch_log.txt\n');
+    fprintf('\nBatch log file created: Batch_model3_log.txt\n');
 end
 
 fprintf('EDF files saved in: %s\nLogs saved in: %s\n', output_folder, log_folder);

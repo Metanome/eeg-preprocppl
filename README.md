@@ -1,13 +1,38 @@
-# EEG Preprocessing Pipeline
+# EEG Preprocessing Pipeline with Automated Comparison
 
-**Enhanced MATLAB scripts for automated EEG preprocessing using EEGLAB** - Designed for hospital EEG data with 19-channel montage, featuring comprehensive monitoring, validation, and reporting.
+**Complete MATLAB toolkit for automated EEG preprocessing using EEGLAB** - Designed for hospital EEG data with flexible channel montage support (19-128 channels), featuring comprehensive processing, validation, and comparative analysis.
 
-## Pipeline Models
+## Quick Start Guide
+
+### Prerequisites
+- **MATLAB** (R2018b or later recommended)
+- **EEGLAB toolbox** (latest version)
+- **ICLabel plugin** (required for Model 3 ICA functionality)
+- **Signal Processing Toolbox** (for advanced analysis)
+
+### Basic Usage
+1. **Place EEG files** in `eeg_files/` folder (supports CNT, EDF, GDF formats)
+2. **Choose processing model**:
+   - **Model 2**: Run `model2_eeg_prep.m` for basic preprocessing (7 steps)
+   - **Model 3**: Run `model3_eeg_prep.m` for advanced ICA preprocessing (11 steps)
+3. **Processed files** saved to `output/` folder:
+   - Model 2: `[filename]_model2_preprocessed.edf`
+   - Model 3: `[filename]_model3_preprocessed.edf`
+4. **Processing logs** saved to `logs/` folder:
+   - Single file: `[filename]_model2_log.txt` or `[filename]_model3_log.txt`
+   - Batch mode: `Batch_model2_log.txt` or `Batch_model3_log.txt`
+
+### Model Selection Guide
+- **Use Model 2** for: Quick preprocessing, baseline processing, when ICA is not required
+- **Use Model 3** for: Research-grade preprocessing with artifact removal, high-quality clean data requirements
+- **Use Comparison Tool** for: Validating script vs manual processing, evaluating ICA effectiveness
+
+## Pipeline Components
 
 ### Model 2: Basic Preprocessing (`model2_eeg_prep.m`)
 **7-step basic preprocessing pipeline** without ICA:
 1. Import with time range (0-180 sec)
-2. Remove reference channels (A1, A2) and EOG
+2. Remove unwanted channels (configurable: reference, EOG, EMG, ECG)
 3. Downsample to 125 Hz
 4. Bandpass filter (0.5-40 Hz)
 5. Clean raw data (artifact removal with ASR)
@@ -17,123 +42,83 @@
 ### Model 3: Advanced ICA Pipeline (`model3_eeg_prep.m`)
 **11-step advanced preprocessing pipeline** with automated ICA artifact removal:
 1. Import with time range (0-180 sec)
-2. Remove reference channels (A1, A2) and EOG
+2. Remove unwanted channels (configurable: reference, EOG, EMG, ECG)
 3. Downsample to 125 Hz
 4. Bandpass filter (0.5-40 Hz)
 5. Clean raw data (artifact removal with ASR)
-6. Add channel locations (Standard 10-20)
+6. Add channel locations (Dynamic montage detection: 19/21/25/32/64/128 channels)
 7. Run ICA decomposition
 8. Classify components using ICLabel
-9. Remove artifact components
+9. Remove artifact components (Brain ≥70% retained, others removed)
 10. Re-reference to average
 11. Save as preprocessed EDF
 
-## Features
+### Comparison Tool (`compare_models.m`)
+**Automated comparison analysis** for systematic evaluation:
+- **Interactive menu system** for easy comparison selection
+- **Multiple comparison types**: Script vs Manual, Model 2 vs Model 3
+- **Statistical significance testing** with p-values
+- **Enhanced visualizations and reporting**
 
-### Core Processing Pipeline
+## Key Features
+
+### Core Processing Capabilities
 - **Multi-format support**: CNT, EDF, and GDF file formats
-- **Automated ICA artifact removal** (Model 3 only):
-  - Independent Component Analysis using Extended Infomax
-  - Automatic component classification with ICLabel
-  - Intelligent artifact removal (Brain components >70% retained)
-  - Replaces manual component inspection workflow
+- **Flexible channel removal**: Configurable removal of reference, EOG, EMG, ECG channels with safety protections
+- **Dynamic channel location assignment**: Automatic montage selection (19-128 channels)
+- **Automated ICA artifact removal** (Model 3): Extended Infomax with ICLabel classification
+- **Robust error handling**: Graceful failure recovery with detailed error reporting
 
-### Enhanced Monitoring & Validation
-- **Processing Time Logging**: Individual step timing and total processing time per file
-- **Progress Indicators**: Real-time progress with estimated time remaining for batch processing
-- **File Validation**: Automatic validation of file existence, size, and format
-- **Smart Logging System**:
-  - Single file: Creates `FileName_log.txt`
-  - Multiple files: Creates consolidated `Batch_log.txt`
-- **Comprehensive Error Handling**: Graceful failure recovery with detailed error reporting
+### Channel Removal Configuration
+Both models support **flexible channel removal configuration**:
+```matlab
+%% CHANNEL REMOVAL CONFIGURATION
+REMOVE_REFERENCE_CHANNELS = true;    % A1, A2, M1, M2, TP9, TP10, etc.
+REMOVE_EOG_CHANNELS = true;          % VEOG, HEOG, EOG1, EOG2, etc.
+REMOVE_EMG_CHANNELS = false;         % EMG, Chin, etc.
+REMOVE_ECG_CHANNELS = false;         % ECG, EKG, etc.
 
-### Quality Assessment & Metrics
-- **Signal Quality Analysis**: Before/after amplitude and variability tracking
-- **Power Spectral Density Analysis**: Frequency band power analysis (Delta, Theta, Alpha, Beta, Gamma)
-- **Advanced Statistical Measures**: Kurtosis, skewness, channel consistency, temporal stability
-- **Data Retention Analysis**: Percentage of data preserved after cleaning
-- **ICA Quality Metrics** (Model 3 only):
-  - ICLabel classification confidence
-  - Component breakdown (Brain, Muscle, Eye, Heart, etc.)
-  - Brain component consistency and separation quality
-  - Artifact reduction estimates
+% Manual specification
+MANUAL_CHANNELS_TO_REMOVE = {};      % e.g., {'BadChannel1', 'Artifact2'}
 
-## Usage
-
-### Basic Usage
-1. Place EEG files in `eeg_files/` folder
-2. Choose your processing model:
-   - **Model 2**: Run `model2_eeg_prep.m` for basic preprocessing
-   - **Model 3**: Run `model3_eeg_prep.m` for advanced ICA preprocessing
-3. Processed files saved to `output/` folder
-4. Processing logs saved to `logs/` folder
-
-### Model Selection Guide
-- **Use Model 2** for:
-  - Quick preprocessing without artifact removal
-  - When ICA is not required
-  - Baseline preprocessing pipeline
-  
-- **Use Model 3** for:
-  - Research-grade preprocessing with artifact removal
-  - When high-quality clean data is required
-  - Automated replication of manual EEGLAB workflow
-  - Detailed quality assessment and reporting
-
-## Quality Metrics & Logging
-
-### Individual File Logs
-Each processing session generates detailed logs with:
-- **Step-by-step timing and results**
-- **Quality metrics**: Channels, events, data retention, signal statistics
-- **Power spectral analysis**: Frequency band changes (before/after)
-- **ICA metrics** (Model 3): Component classification, removal decisions
-- **Statistical quality**: Kurtosis, skewness, channel consistency
-- **Error tracking and diagnostics**
-
-### Batch Summary Reports
-- **Processing time statistics**: Average, range, total batch time
-- **Success/failure rates**: File processing statistics
-- **Quality metric aggregation**: Data retention, signal changes
-- **Performance benchmarking**: Processing efficiency analysis
-
-### Advanced Quality Validation (Model 3)
-- **Realistic warning thresholds**: Calibrated for typical EEG preprocessing
-- **Power change validation**: Flags unrealistic spectral changes (>30 dB)
-- **Over-processing detection**: Warns for extreme signal reduction (>20x amplitude, >200x variability)
-- **ICA quality assessment**: Component separation quality and confidence metrics
-
-## Requirements
-
-- **MATLAB** (R2018b or later recommended)
-- **EEGLAB toolbox** (latest version)
-- **ICLabel plugin** (required for Model 3 ICA functionality)
-- **Supported EEG file formats**: CNT, EDF, GDF
-- **System**: Windows/macOS/Linux compatible
-
-## Directory Structure
-```
-Model2-EEG-Pipeline/
-├── model2_eeg_prep.m          # Basic preprocessing script (7 steps)
-├── model3_eeg_prep.m          # Advanced ICA preprocessing script (11 steps)
-├── eeg_files/                 # Input EEG files
-├── output/                    # Processed EDF files
-├── logs/                      # Processing logs and reports
-└── README.md                  # This file
+% Safety protection
+CHANNELS_TO_NEVER_REMOVE = {'Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', ...
+                            'O1', 'O2', 'F7', 'F8', 'T3', 'T4', 'T5', 'T6', ...
+                            'Fz', 'Cz', 'Pz', 'Oz'};
 ```
 
-## Technical Details
+### Quality Monitoring & Validation
+- **Real-time progress tracking**: Step timing and estimated completion time
+- **Smart logging system**: Individual file logs or consolidated batch logs
+- **Comprehensive quality metrics**:
+  - Signal statistics and power spectral analysis
+  - ICA component classification and removal decisions
+  - Data retention analysis and processing effectiveness
+  - Statistical quality measures (kurtosis, skewness, channel consistency)
 
-### ICA Implementation (Model 3)
-The automated ICA workflow replicates the manual EEGLAB process:
+## Comparison Analysis
 
-1. **Channel Location Assignment**: Automatic lookup using Standard 10-20 Cap19
-2. **ICA Decomposition**: Extended Infomax algorithm via `pop_runica`
-3. **Component Classification**: ICLabel automatic classification replacing manual inspection
-4. **Artifact Removal**: Threshold-based removal (Brain probability ≤ 70%)
+### Setup and Usage
+1. **Set up comparison folders**:
+   - `compare_models/script/model2/` - Script-processed Model 2 files
+   - `compare_models/script/model3/` - Script-processed Model 3 files
+   - `compare_models/manual/model2/` - Manually-processed Model 2 files
+   - `compare_models/manual/model3/` - Manually-processed Model 3 files
+2. **Run comparison**: Execute `compare_models.m`
+3. **Select comparison type** from interactive menu
+4. **Results** saved in `compare_models/results/` with unique filenames
 
-### Quality Thresholds
-- **Brain Component Retention**: >70% brain probability threshold
+### Analysis Features
+- **Signal quality assessment**: Amplitude, variability, SNR improvements
+- **Power spectral density analysis**: Frequency band changes (Delta, Theta, Alpha, Beta, Gamma)
+- **Statistical significance testing**: Wilcoxon signed-rank tests
+- **Channel correlation analysis**: Signal preservation assessment
+- **Visual reporting**: Automated plot generation with summary statistics
+
+## Quality Metrics & Thresholds
+
+### Processing Quality Validation
+- **Brain Component Retention**: ≥70% brain probability threshold (Model 3)
 - **Power Change Validation**: 
   - Normal: <15 dB change
   - Substantial: 15-30 dB change  
@@ -141,3 +126,88 @@ The automated ICA workflow replicates the manual EEGLAB process:
 - **Signal Reduction Warnings**:
   - Amplitude: >20x reduction flagged
   - Variability: >200x reduction flagged
+
+### ICA Quality Assessment (Model 3)
+- **Component classification confidence**: ICLabel probability scores
+- **Retained vs removed component breakdown**: Brain, Muscle, Eye, Heart, Line Noise, Channel Noise, Other
+- **Brain component consistency**: Variability in brain component confidence scores
+- **Component separation quality**: Information entropy measures for classification clarity
+- **Artifact reduction effectiveness**: Before/after signal quality comparisons
+- **Processing warnings**: Automatic detection of extreme signal reductions or processing issues
+
+## Directory Structure
+```
+Model2-EEG-Pipeline/
+├── model2_eeg_prep.m          # Basic preprocessing script (7 steps)
+├── model3_eeg_prep.m          # Advanced ICA preprocessing script (11 steps)
+├── compare_models.m           # Automated comparison analysis tool
+├── eeg_files/                 # Input EEG files
+├── output/                    # Processed EDF files
+├── logs/                      # Processing logs and reports
+├── compare_models/            # Comparison analysis folder
+│   ├── script/               # Script-processed files
+│   │   ├── model2/          # Model 2 script results
+│   │   └── model3/          # Model 3 script results
+│   ├── manual/               # Manually-processed files
+│   │   ├── model2/          # Model 2 manual results
+│   │   └── model3/          # Model 3 manual results
+│   ├── results/              # Comparison plots and analysis
+│   ├── logs/                 # Comparison logs
+│   └── README.md             # Comparison tool documentation
+└── README.md                  # This file
+```
+
+## Technical Implementation
+
+### ICA Implementation (Model 3)
+The automated ICA workflow replicates the manual EEGLAB process:
+- **Channel Location Assignment**: Dynamic selection based on channel count
+- **ICA Decomposition**: Extended Infomax algorithm via `pop_runica`
+- **Component Classification**: ICLabel automatic classification
+- **Artifact Removal**: Threshold-based removal (Brain probability ≥ 70%)
+
+### File Processing Architecture
+- **Batch processing**: Multiple files processed automatically with progress tracking
+- **Error recovery**: Failed files logged and skipped, processing continues
+- **Memory management**: Automatic cleanup between files
+- **Smart logging**: Single file or consolidated batch logs
+- **Output format**: Model-specific EDF files with suffixes `_model2_preprocessed.edf` and `_model3_preprocessed.edf`
+- **Progress indication**: Real-time processing status with time estimates
+- **Quality validation**: Automatic warnings for unusual signal changes or processing issues
+
+## Support & Troubleshooting
+
+### Common Issues
+- **Dynamic channel location assignment**: Supports 19-128 channel montages with automatic fallbacks
+- **ICLabel requires channel locations**: System automatically selects appropriate montage file
+- **Memory issues with large files**: Consider processing smaller time segments
+- **File format compatibility**: Test with single files first before batch processing
+- **Log file access**: Logs are created during processing; ensure write permissions to logs folder
+- **Missing dependencies**: Ensure EEGLAB and ICLabel plugin are properly installed
+
+### Error Recovery Features
+- **Graceful failure handling**: Failed files are logged and skipped, allowing batch processing to continue
+- **Memory management**: Automatic cleanup between files to prevent memory issues
+- **Progress tracking**: Real-time progress indicators with estimated completion times
+- **Quality validation**: Automatic detection of over-processing or unusual signal changes
+
+### Validation Workflow
+1. **Process test files** with both Model 2 and Model 3
+2. **Run comparison analysis** to validate ICA effectiveness
+3. **Review quality metrics** in generated logs
+4. **Check log file naming**: 
+   - Single files: `[filename]_model2_log.txt` or `[filename]_model3_log.txt`
+   - Batch processing: `Batch_model2_log.txt` or `Batch_model3_log.txt`
+5. **Adjust thresholds** if needed for your specific data characteristics
+
+### Log File Organization
+- **Individual file processing**: Creates separate log for each file (e.g., `subject001_model2_log.txt`)
+- **Batch processing**: Creates consolidated logs (`Batch_model2_log.txt`, `Batch_model3_log.txt`)
+- **Log contents**: Step-by-step processing details, quality metrics, error handling, and performance statistics
+- **Comparison logs**: Saved in `compare_models/logs/` with timestamp-based naming
+
+### Output File Organization
+- **Model-specific naming**: Prevents overwrites when processing same file with both models
+- **Clear identification**: Easy to distinguish between Model 2 and Model 3 outputs
+- **Comparison-ready**: Output files are automatically organized for comparison tool analysis
+- **Example**: `subject001.cnt` → `subject001_model2_preprocessed.edf` + `subject001_model3_preprocessed.edf`
