@@ -22,9 +22,9 @@
 4. Bandpass filter (0.5-40 Hz)
 5. Clean raw data (artifact removal with ASR)
 6. Add channel locations (Standard 10-20)
-7. **Run ICA decomposition (`pop_runica`)**
-8. **Classify components using ICLabel**
-9. **Remove artifact components (`pop_subcomp`)**
+7. Run ICA decomposition
+8. Classify components using ICLabel
+9. Remove artifact components
 10. Re-reference to average
 11. Save as preprocessed EDF
 
@@ -57,13 +57,6 @@
   - Component breakdown (Brain, Muscle, Eye, Heart, etc.)
   - Brain component consistency and separation quality
   - Artifact reduction estimates
-
-### Manual Workflow Automation (Model 3)
-Model 3 automates the complete manual EEGLAB workflow:
-- **Channel Locations** (`pop_chanedit`) - Automatic Standard 10-20 lookup
-- **ICA Decomposition** (`pop_runica`) - Extended Infomax algorithm
-- **Component Classification** - ICLabel replaces manual inspection (`pop_viewprops`)
-- **Artifact Removal** (`pop_subcomp`) - Automated based on brain probability threshold
 
 ## Usage
 
@@ -126,13 +119,6 @@ Model2-EEG-Pipeline/
 ├── eeg_files/                 # Input EEG files
 ├── output/                    # Processed EDF files
 ├── logs/                      # Processing logs and reports
-├── Channel Locations.png      # Manual workflow reference screenshots
-├── pop_chanedit().png
-├── pop_runica().png
-├── Classify components using ICLabel; Label components.png
-├── pop_viewprops().png
-├── View components properties; pop_viewprops().png
-├── pop_subcomp().png
 └── README.md                  # This file
 ```
 
