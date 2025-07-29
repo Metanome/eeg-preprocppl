@@ -149,7 +149,7 @@ Model2-EEG-Pipeline/
 ├── model3_eeg_prep.m          # Advanced ICA preprocessing script (11 steps)
 ├── prepare_external_data.m    # External data standardization script
 ├── compare_models.m           # Automated comparison analysis tool
-├── eeg_files/                 # Input for all EEG files (main and external)
+├── eeg_files/                 # Input for all EEG files
 ├── output/                    # Output for all processed files
 ├── logs/                      # Processing logs and reports
 ├── compare_models/            # Comparison analysis folder
