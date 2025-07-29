@@ -59,6 +59,13 @@
 - **Multiple comparison types**: Script vs Manual, Model 2 vs Model 3
 - **Statistical significance testing** with p-values
 - **Enhanced visualizations and reporting**
+### External Data Preparation (`prepare_external_data.m`)
+**Utility script to standardize external EEG datasets to the required 19-channel montage.**
+1.  **Place external EEG files** in the `eeg_files/` folder alongside your other data.
+2.  **Configure channel renaming** in `prepare_external_data.m` to map dataset-specific channel names to your target names (e.g., `T7` -> `T3`).
+3.  **Run the script**.
+4.  **Standardized files** are saved to the `output/` folder with a `_prepared.edf` suffix.
+
 
 ## Key Features
 
@@ -140,9 +147,10 @@ CHANNELS_TO_NEVER_REMOVE = {'Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', ..
 Model2-EEG-Pipeline/
 ├── model2_eeg_prep.m          # Basic preprocessing script (7 steps)
 ├── model3_eeg_prep.m          # Advanced ICA preprocessing script (11 steps)
+├── prepare_external_data.m    # External data standardization script
 ├── compare_models.m           # Automated comparison analysis tool
-├── eeg_files/                 # Input EEG files
-├── output/                    # Processed EDF files
+├── eeg_files/                 # Input for all EEG files (main and external)
+├── output/                    # Output for all processed files
 ├── logs/                      # Processing logs and reports
 ├── compare_models/            # Comparison analysis folder
 │   ├── script/               # Script-processed files
