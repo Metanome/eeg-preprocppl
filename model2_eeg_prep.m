@@ -1,7 +1,36 @@
-% USER CONFIGURATION
-% Required: Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz
+% EEG PREPROCESSING PIPELINE - BASIC (Model 2)
+% =============================================
+% Automated preprocessing pipeline without ICA
+% Supports flexible channel montages: 19, 21, 25, 32, 64, 128 channels
+% Required: Standard EEG channels (Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz)
 %
-% CHANNEL REMOVAL CONFIGURATION
+% PIPELINE STEPS:
+% 1. Import EEG data (configurable time range)
+% 2. Remove unwanted channels (configurable)
+% 3. Resample to target Hz
+% 4. Bandpass filter
+% 5. Clean raw data (ASR artifact removal)
+% 6. Re-reference to average
+% 7. Save as EDF
+
+%% ========================================================================
+%  USER CONFIGURATION - Modify these settings as needed
+%% ========================================================================
+
+%% PROCESSING PARAMETERS
+% =================================
+IMPORT_TIME_RANGE_SEC = 180;         % Import first N seconds (set to Inf to import all data)
+TARGET_SAMPLE_RATE_HZ = 125;         % Target sample rate after downsampling
+FILTER_LOW_HZ = 0.5;                 % Bandpass filter low cutoff (Hz)
+FILTER_HIGH_HZ = 40;                 % Bandpass filter high cutoff (Hz)
+
+%% ASR (ARTIFACT SUBSPACE RECONSTRUCTION) PARAMETERS
+% =================================
+ASR_BURST_CRITERION = 20;            % Threshold for ASR burst removal (lower = more aggressive)
+ASR_WINDOW_CRITERION = 0.25;         % Proportion of bad channels to trigger window rejection
+ASR_WINDOW_TOLERANCES = [-Inf 7];    % Tolerance range for window rejection
+
+%% CHANNEL REMOVAL CONFIGURATION
 % =================================
 % Configure which types of channels to remove automatically
 REMOVE_REFERENCE_CHANNELS = true;    % Remove reference electrodes (A1, A2, M1, M2, etc.)
@@ -14,27 +43,42 @@ MANUAL_CHANNELS_TO_REMOVE = {};      % e.g., {'BadChannel1', 'Artifact2'}
 
 % Safety: Channels that should NEVER be removed (protection list)
 CHANNELS_TO_NEVER_REMOVE = {'Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', ...
-                            'O1', 'O2', 'F7', 'F8', 'T3', 'T4', 'T5', 'T6', ...
-                            'Fz', 'Cz', 'Pz', 'Oz'};
+    'O1', 'O2', 'F7', 'F8', 'T3', 'T4', 'T5', 'T6', ...
+    'Fz', 'Cz', 'Pz', 'Oz'};
 
-input_folder = fullfile(pwd, 'eeg_files');
-output_folder = fullfile(pwd, 'output');
-log_folder = fullfile(pwd, 'logs');
+%% DISPLAY CONFIGURATION
+% =================================
+SHOW_EEGLAB_GUI = false;             % Set to true to show EEGLAB GUI during processing
+
+%% CHANNEL NAME CLEANING
+% =================================
+STRIP_CHANNEL_SUFFIXES = true;       % Remove reference suffixes from channel names
+CHANNEL_SUFFIX_PATTERN = '-(AA|Ref)$';  % Regex pattern for suffixes to remove (e.g., Fp1-AA -> Fp1)
+
+%% FOLDER CONFIGURATION
+% =================================
+INPUT_FOLDER = fullfile(pwd, 'eeg_files');
+OUTPUT_FOLDER = fullfile(pwd, 'output');
+LOG_FOLDER = fullfile(pwd, 'logs');
+
+%% ========================================================================
+%  END OF USER CONFIGURATION - Do not modify below unless you know what you're doing
+%% ========================================================================
 
 % Create folders if they don't exist
-if ~exist(input_folder, 'dir'), mkdir(input_folder); end
-if ~exist(output_folder, 'dir'), mkdir(output_folder); end
-if ~exist(log_folder, 'dir'), mkdir(log_folder); end
+if ~exist(INPUT_FOLDER, 'dir'), mkdir(INPUT_FOLDER); end
+if ~exist(OUTPUT_FOLDER, 'dir'), mkdir(OUTPUT_FOLDER); end
+if ~exist(LOG_FOLDER, 'dir'), mkdir(LOG_FOLDER); end
 
 % Get .cnt, .edf, and .gdf files from input folder
-cnt_files = dir(fullfile(input_folder, '*.cnt'));
-edf_files = dir(fullfile(input_folder, '*.edf'));
-gdf_files = dir(fullfile(input_folder, '*.gdf'));
+cnt_files = dir(fullfile(INPUT_FOLDER, '*.cnt'));
+edf_files = dir(fullfile(INPUT_FOLDER, '*.edf'));
+gdf_files = dir(fullfile(INPUT_FOLDER, '*.gdf'));
 eeg_files = [cnt_files; edf_files; gdf_files];
 
 % Check if any EEG files were found
 if isempty(eeg_files)
-    fprintf('\nERROR: No EEG files found in %s\n', input_folder);
+    fprintf('\nERROR: No EEG files found in %s\n', INPUT_FOLDER);
     fprintf('Expected file types: .cnt, .edf, .gdf\n');
     fprintf('Please add EEG files to the input folder and run again.\n\n');
     return;
@@ -51,17 +95,21 @@ batch_start_time = tic;
 processing_times = [];
 batch_stats = struct('processed', 0, 'failed', 0, 'total', length(eeg_files));
 
-% Start EEGLAB
-[ALLEEG, EEG, CURRENTSET, ALLCOM] = eeglab;
+% Start EEGLAB (with or without GUI based on configuration)
+if SHOW_EEGLAB_GUI
+    [ALLEEG, EEG, CURRENTSET, ALLCOM] = eeglab;
+else
+    [ALLEEG, EEG, CURRENTSET, ALLCOM] = eeglab('nogui');
+end
 
 % Process each EEG file
 for i = 1:length(eeg_files)
     file_start_time = tic;
-    
+
     filename = eeg_files(i).name;
     filepath = fullfile(eeg_files(i).folder, filename);
     [~, name_no_ext, ext] = fileparts(filename);
-    
+
     % Progress indicator with estimated time remaining
     if i > 1 && ~isempty(processing_times)
         avg_time = mean(processing_times);
@@ -72,28 +120,28 @@ for i = 1:length(eeg_files)
     else
         fprintf('\n[%d/%d] Processing: %s\n', i, length(eeg_files), filename);
     end
-    
+
     % File validation
     if ~exist(filepath, 'file')
         fprintf('[ERROR] File not found: %s\n', filepath);
         batch_stats.failed = batch_stats.failed + 1;
         continue;
     end
-    
+
     file_info = dir(filepath);
     if file_info.bytes == 0
         fprintf('[ERROR] Empty file: %s\n', filename);
         batch_stats.failed = batch_stats.failed + 1;
         continue;
     end
-    
+
     % Smart logging: single file gets individual log, multiple files get batch log
     if length(eeg_files) == 1
-        log_file = fullfile(log_folder, [name_no_ext '_model2_log.txt']);
+        log_file = fullfile(LOG_FOLDER, [name_no_ext '_model2_log.txt']);
     else
-        log_file = fullfile(log_folder, 'Batch_model2_log.txt');
+        log_file = fullfile(LOG_FOLDER, 'Batch_model2_log.txt');
     end
-    
+
     % Open log file (append mode for batch, write mode for single file)
     if length(eeg_files) == 1
         logID = fopen(log_file, 'w');
@@ -104,35 +152,49 @@ for i = 1:length(eeg_files)
             logID = fopen(log_file, 'a');
         end
     end
-    
+
     if logID == -1
         fprintf('[WARNING] Could not create log file for %s, continuing without logging\n', filename);
         logID = 1; % Use stdout as fallback
     end
-    
+
+    % Guarantee log file is closed even if an error occurs
+    if logID ~= 1
+        logCleanup = onCleanup(@() fclose(logID));
+    end
+
     fprintf(logID, '=== Processing: %s ===\n', filename);
     fprintf(logID, 'Started: %s\n', datestr(now));
     fprintf(logID, 'File size: %.2f MB\n\n', file_info.bytes/1024/1024);
-    
-    %% Step 1: Import file with time range 0–180 sec
+
+    %% Step 1: Import file with time range
     step_start = tic;
     try
+        % Build import options based on configuration
+        if isinf(IMPORT_TIME_RANGE_SEC)
+            import_opts = {}; % Import all data
+            time_range_str = 'all';
+        else
+            import_opts = {'blockrange', [0 IMPORT_TIME_RANGE_SEC]};
+            time_range_str = sprintf('0–%d sec', IMPORT_TIME_RANGE_SEC);
+        end
+
         switch lower(ext)
             case '.cnt'
-                EEG = pop_biosig(filepath, 'blockrange', [0 180], ...
+                EEG = pop_biosig(filepath, import_opts{:}, ...
                     'importevent', 'on', 'rmeventchan', 'on', 'importannot', 'on', ...
                     'bdfeventmode', 4, 'blockepoch', 'on');
-                fprintf(logID, 'Imported CNT file using pop_biosig() with time 0–180 sec.\n');            
+                fprintf(logID, 'Imported CNT file using pop_biosig() with time %s.\n', time_range_str);
             case '.edf'
-                EEG = pop_biosig(filepath, 'blockrange', [0 180], ...
+                EEG = pop_biosig(filepath, import_opts{:}, ...
                     'importevent', 'on', 'rmeventchan', 'on', 'importannot', 'on', ...
                     'bdfeventmode', 4, 'blockepoch', 'off');
-                fprintf(logID, 'Imported EDF file using pop_biosig() with time 0–180 sec.\n');
+                fprintf(logID, 'Imported EDF file using pop_biosig() with time %s.\n', time_range_str);
             case '.gdf'
-                EEG = pop_biosig(filepath, 'blockrange', [0 180], ...
+                EEG = pop_biosig(filepath, import_opts{:}, ...
                     'importevent', 'on', 'rmeventchan', 'on', 'importannot', 'on', ...
                     'bdfeventmode', 4, 'blockepoch', 'on');
-                fprintf(logID, 'Imported GDF file using pop_biosig() with time 0–180 sec.\n');            
+                fprintf(logID, 'Imported GDF file using pop_biosig() with time %s.\n', time_range_str);
             otherwise
                 fprintf(logID, 'Unsupported file format: %s\n', ext);
                 fclose(logID);
@@ -140,74 +202,93 @@ for i = 1:length(eeg_files)
                 continue;
         end
         [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, 0);
-        
+
         % Store initial metrics including signal statistics
         initial_channels = EEG.nbchan;
         initial_events = length(EEG.event);
         initial_duration = EEG.xmax;
         initial_mean_amplitude = mean(abs(EEG.data(:)));
         initial_std_amplitude = std(EEG.data(:));
-        
+
         % Log import results with timing
         step_time = toc(step_start);
         fprintf(logID, 'Step 1 - Import: %d channels, %d events, %.3f sec, %d frames, %.1f Hz (%.2fs)\n', ...
-            EEG.nbchan, length(EEG.event), EEG.xmax, EEG.pnts, EEG.srate, step_time);    catch ME
+            EEG.nbchan, length(EEG.event), EEG.xmax, EEG.pnts, EEG.srate, step_time);
+    catch ME
         fprintf(logID, 'ERROR during import: %s\n', ME.message);
         fprintf('[ERROR] Import failed for %s: %s\n', filename, ME.message);
-        if logID ~= 1, fclose(logID); end
         batch_stats.failed = batch_stats.failed + 1;
-        
+
         % Clean up any partial EEG data
         if exist('EEG', 'var') && ~isempty(EEG)
             clear EEG;
         end
+        clear logCleanup; % Triggers onCleanup to close log file
         continue;
     end
-    
+
+    %% Step 1b: Clean channel labels (remove reference suffixes)
+    if STRIP_CHANNEL_SUFFIXES
+        channels_renamed = 0;
+        for ch = 1:length(EEG.chanlocs)
+            original_label = EEG.chanlocs(ch).labels;
+            new_label = regexprep(original_label, CHANNEL_SUFFIX_PATTERN, '');
+            if ~strcmp(original_label, new_label)
+                EEG.chanlocs(ch).labels = new_label;
+                channels_renamed = channels_renamed + 1;
+            end
+        end
+        EEG = eeg_checkset(EEG);
+        if channels_renamed > 0
+            fprintf(logID, 'Step 1b - Cleaned %d channel labels (removed suffixes matching: %s)\n', ...
+                channels_renamed, CHANNEL_SUFFIX_PATTERN);
+        end
+    end
+
     %% Step 2: Remove unwanted channels (configurable)
     step_start = tic;
-    
+
     % Build comprehensive list of channels to potentially remove
     channels_to_remove = {};
-    
+
     % Reference channels (various naming conventions)
     if REMOVE_REFERENCE_CHANNELS
         ref_channels = {'A1', 'A2', 'M1', 'M2', 'TP9', 'TP10', 'REF', 'Ref', 'ref', ...
-                       'LM', 'RM', 'LEFT_EAR', 'RIGHT_EAR', 'LE', 'RE'};
+            'LM', 'RM', 'LEFT_EAR', 'RIGHT_EAR', 'LE', 'RE'};
         channels_to_remove = [channels_to_remove, ref_channels];
     end
-    
+
     % EOG channels (various naming conventions)
     if REMOVE_EOG_CHANNELS
         eog_channels = {'VEOG', 'veog', 'HEOG', 'heog', 'EOG1', 'EOG2', 'EOG', 'eog', ...
-                       'EOGH', 'EOGV', 'LEOG', 'REOG', 'UPEOG', 'LOWEOG', 'vEOG', 'hEOG', ...
-                       'EOG_L', 'EOG_R', 'EOG_U', 'EOG_D', 'VEOG+', 'VEOG-', 'HEOG+', 'HEOG-'};
+            'EOGH', 'EOGV', 'LEOG', 'REOG', 'UPEOG', 'LOWEOG', 'vEOG', 'hEOG', ...
+            'EOG_L', 'EOG_R', 'EOG_U', 'EOG_D', 'VEOG+', 'VEOG-', 'HEOG+', 'HEOG-'};
         channels_to_remove = [channels_to_remove, eog_channels];
     end
-    
+
     % EMG channels
     if REMOVE_EMG_CHANNELS
         emg_channels = {'EMG', 'emg', 'EMG1', 'EMG2', 'Chin', 'chin', 'CHIN', ...
-                       'EMG_CHIN', 'EMG_L', 'EMG_R', 'EMG_LT', 'EMG_RT'};
+            'EMG_CHIN', 'EMG_L', 'EMG_R', 'EMG_LT', 'EMG_RT'};
         channels_to_remove = [channels_to_remove, emg_channels];
     end
-    
+
     % ECG channels
     if REMOVE_ECG_CHANNELS
         ecg_channels = {'ECG', 'ecg', 'EKG', 'ekg', 'ECG1', 'ECG2', 'HEART', 'heart', ...
-                       'ECG_L', 'ECG_R', 'EKG1', 'EKG2', 'CARD'};
+            'ECG_L', 'ECG_R', 'EKG1', 'EKG2', 'CARD'};
         channels_to_remove = [channels_to_remove, ecg_channels];
     end
-    
+
     % Add manual channels
     channels_to_remove = [channels_to_remove, MANUAL_CHANNELS_TO_REMOVE];
-    
+
     % Get available channels in the data
     available_channels = {EEG.chanlocs.labels};
-    
+
     % Find channels that actually exist in the data and should be removed
     toRemove = intersect(available_channels, channels_to_remove);
-    
+
     % Apply safety filter: remove any protected channels from removal list
     if ~isempty(CHANNELS_TO_NEVER_REMOVE)
         protected_found = intersect(toRemove, CHANNELS_TO_NEVER_REMOVE);
@@ -217,7 +298,7 @@ for i = 1:length(eeg_files)
             toRemove = setdiff(toRemove, CHANNELS_TO_NEVER_REMOVE);
         end
     end
-    
+
     % Log what was found and what will be removed
     fprintf(logID, 'Channel removal configuration:\n');
     fprintf(logID, '  Reference channels: %s, EOG channels: %s\n', ...
@@ -228,7 +309,7 @@ for i = 1:length(eeg_files)
         fprintf(logID, '  Manual removal list: %s\n', strjoin(MANUAL_CHANNELS_TO_REMOVE, ', '));
     end
     fprintf(logID, '  Available channels (%d): %s\n', length(available_channels), strjoin(available_channels, ', '));
-    
+
     % Perform channel removal
     if ~isempty(toRemove)
         EEG = pop_select(EEG, 'nochannel', toRemove);
@@ -238,26 +319,26 @@ for i = 1:length(eeg_files)
     else
         step_time = toc(step_start);
         fprintf(logID, 'Step 2 - No channels removed (no matching channels found, %.2fs)\n', step_time);
-    end    
-    
-    %% Step 3: Downsample to 125 Hz
+    end
+
+    %% Step 3: Downsample to target sample rate
     step_start = tic;
-    if EEG.srate ~= 125
-        EEG = pop_resample(EEG, 125);
+    if EEG.srate ~= TARGET_SAMPLE_RATE_HZ
+        EEG = pop_resample(EEG, TARGET_SAMPLE_RATE_HZ);
         step_time = toc(step_start);
-        fprintf(logID, 'Step 3 - Downsampled to 125 Hz (%.2fs)\n', step_time);
+        fprintf(logID, 'Step 3 - Downsampled to %d Hz (%.2fs)\n', TARGET_SAMPLE_RATE_HZ, step_time);
     else
         step_time = toc(step_start);
-        fprintf(logID, 'Step 3 - Already at 125 Hz, no resampling needed (%.2fs)\n', step_time);    
+        fprintf(logID, 'Step 3 - Already at %d Hz, no resampling needed (%.2fs)\n', TARGET_SAMPLE_RATE_HZ, step_time);
     end
-    
-    %% Step 4: Bandpass filter: 0.5–40 Hz
+
+    %% Step 4: Bandpass filter
     step_start = tic;
-    EEG = pop_eegfiltnew(EEG, 0.5, 40, [], 0, [], 1);
+    EEG = pop_eegfiltnew(EEG, FILTER_LOW_HZ, FILTER_HIGH_HZ, [], 0, [], 1);
     step_time = toc(step_start);
-    fprintf(logID, 'Step 4 - Applied bandpass filter: 0.5–40 Hz (%.2fs)\n', step_time);    
-    
-    %% Step 5: Clean raw data with parameters matching manual process
+    fprintf(logID, 'Step 4 - Applied bandpass filter: %.1f–%d Hz (%.2fs)\n', FILTER_LOW_HZ, FILTER_HIGH_HZ, step_time);
+
+    %% Step 5: Clean raw data with ASR
     step_start = tic;
     data_before_cleaning = size(EEG.data, 2);
     EEG = pop_clean_rawdata(EEG, ...
@@ -265,17 +346,17 @@ for i = 1:length(eeg_files)
         'ChannelCriterion', 'off', ...
         'LineNoiseCriterion', 'off', ...
         'Highpass', 'off', ...
-        'BurstCriterion', 20, ...
-        'WindowCriterion', 0.25, ...
+        'BurstCriterion', ASR_BURST_CRITERION, ...
+        'WindowCriterion', ASR_WINDOW_CRITERION, ...
         'BurstRejection', 'on', ...
         'Distance', 'Euclidian', ...
-        'WindowCriterionTolerances', [-Inf 7]);
+        'WindowCriterionTolerances', ASR_WINDOW_TOLERANCES);
     data_after_cleaning = size(EEG.data, 2);
     data_retention = (data_after_cleaning / data_before_cleaning) * 100;
     step_time = toc(step_start);
     fprintf(logID, 'Step 5 - Applied clean_rawdata (%d events after cleaning, %.1f%% data retained, %.2fs)\n', ...
-        length(EEG.event), data_retention, step_time);    
-    
+        length(EEG.event), data_retention, step_time);
+
     %% Step 6: Re-reference to average
     step_start = tic;
     if ~strcmpi(EEG.ref, 'averef')
@@ -286,25 +367,25 @@ for i = 1:length(eeg_files)
         step_time = toc(step_start);
         fprintf(logID, 'Step 6 - Already average referenced, no change needed (%.2fs)\n', step_time);
     end
-    
+
     %% Step 7: Save as EDF
     step_start = tic;
     try
         EEG = eeg_checkset(EEG);
-        out_file = fullfile(output_folder, [name_no_ext '_model2_preprocessed.edf']);
+        out_file = fullfile(OUTPUT_FOLDER, [name_no_ext '_model2_preprocessed.edf']);
         pop_writeeeg(EEG, out_file, 'TYPE', 'EDF');
         step_time = toc(step_start);
         fprintf(logID, 'Step 7 - Saved preprocessed EDF: %s (%.2fs)\n', [name_no_ext '_model2_preprocessed.edf'], step_time);
-        
+
         % Calculate total processing time and quality metrics
         total_processing_time = toc(file_start_time);
         processing_times(end+1) = total_processing_time;
-        
+
         % Calculate final signal statistics
         final_mean_amplitude = mean(abs(EEG.data(:)));
         final_std_amplitude = std(EEG.data(:));
         amplitude_ratio = final_mean_amplitude / initial_mean_amplitude;
-        
+
         % Final summary with enhanced quality metrics
         fprintf(logID, '\n=== PROCESSING COMPLETE ===\n');
         fprintf(logID, 'Total processing time: %.2f seconds\n', total_processing_time);
@@ -318,16 +399,17 @@ for i = 1:length(eeg_files)
         fprintf(logID, 'Final: %d channels, %d events, %.3f sec, %d frames, %.1f Hz\n', ...
             EEG.nbchan, length(EEG.event), EEG.xmax, EEG.pnts, EEG.srate);
         fprintf(logID, '============================\n\n');
-        
+
         batch_stats.processed = batch_stats.processed + 1;
         fprintf('[SUCCESS] %s processed in %.2f seconds\n', filename, total_processing_time);
-          catch ME
+    catch ME
         fprintf(logID, 'ERROR saving EDF: %s\n', ME.message);
         fprintf('[ERROR] Failed to save %s: %s\n', filename, ME.message);
         batch_stats.failed = batch_stats.failed + 1;
     end
 
-    if logID ~= 1, fclose(logID); end
+    % onCleanup handles fclose automatically when logCleanup goes out of scope
+    clear logCleanup;
 end
 
 % Display final batch summary
@@ -356,4 +438,9 @@ else
     fprintf('\nBatch log file created: Batch_model2_log.txt\n');
 end
 
-fprintf('EDF files saved in: %s\nLogs saved in: %s\n', output_folder, log_folder);
+fprintf('EDF files saved in: %s\nLogs saved in: %s\n', OUTPUT_FOLDER, LOG_FOLDER);
+
+% Refresh EEGLAB GUI if it was shown
+if SHOW_EEGLAB_GUI
+    eeglab redraw;
+end

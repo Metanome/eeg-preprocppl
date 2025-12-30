@@ -5,10 +5,10 @@
 % Required: Standard EEG channels (Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz)
 %
 % PIPELINE STEPS:
-% 1. Import EEG data (0-180 sec)
+% 1. Import EEG data (configurable time range)
 % 2. Remove unwanted channels (configurable)
-% 3. Resample to 125 Hz
-% 4. Bandpass filter (0.5-40 Hz)
+% 3. Resample to target Hz
+% 4. Bandpass filter
 % 5. Clean raw data (ASR artifact removal)
 % 6. Add channel locations (Dynamic montage detection)
 % 7. Run ICA decomposition
@@ -16,6 +16,27 @@
 % 9. Remove artifact components (non-brain components)
 % 10. Re-reference to average
 % 11. Save as EDF
+
+%% ========================================================================
+%  USER CONFIGURATION - Modify these settings as needed
+%% ========================================================================
+
+%% PROCESSING PARAMETERS
+% =================================
+IMPORT_TIME_RANGE_SEC = 180;         % Import first N seconds (set to Inf to import all data)
+TARGET_SAMPLE_RATE_HZ = 125;         % Target sample rate after downsampling
+FILTER_LOW_HZ = 0.5;                 % Bandpass filter low cutoff (Hz)
+FILTER_HIGH_HZ = 40;                 % Bandpass filter high cutoff (Hz)
+
+%% ICA PARAMETERS (Model 3 specific)
+% =================================
+BRAIN_THRESHOLD = 0.7;               % ICLabel: min brain probability to keep component (0.0-1.0)
+
+%% ASR (ARTIFACT SUBSPACE RECONSTRUCTION) PARAMETERS
+% =================================
+ASR_BURST_CRITERION = 20;            % Threshold for ASR burst removal (lower = more aggressive)
+ASR_WINDOW_CRITERION = 0.25;         % Proportion of bad channels to trigger window rejection
+ASR_WINDOW_TOLERANCES = [-Inf 7];    % Tolerance range for window rejection
 
 %% CHANNEL REMOVAL CONFIGURATION
 % =================================
@@ -30,27 +51,42 @@ MANUAL_CHANNELS_TO_REMOVE = {};      % e.g., {'BadChannel1', 'Artifact2'}
 
 % Safety: Channels that should NEVER be removed (protection list)
 CHANNELS_TO_NEVER_REMOVE = {'Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', ...
-                            'O1', 'O2', 'F7', 'F8', 'T3', 'T4', 'T5', 'T6', ...
-                            'Fz', 'Cz', 'Pz', 'Oz'};
+    'O1', 'O2', 'F7', 'F8', 'T3', 'T4', 'T5', 'T6', ...
+    'Fz', 'Cz', 'Pz', 'Oz'};
 
-input_folder = fullfile(pwd, 'eeg_files');
-output_folder = fullfile(pwd, 'output');
-log_folder = fullfile(pwd, 'logs');
+%% DISPLAY CONFIGURATION
+% =================================
+SHOW_EEGLAB_GUI = false;             % Set to true to show EEGLAB GUI during processing
+
+%% CHANNEL NAME CLEANING
+% =================================
+STRIP_CHANNEL_SUFFIXES = true;       % Remove reference suffixes from channel names
+CHANNEL_SUFFIX_PATTERN = '-(AA|Ref)$';  % Regex pattern for suffixes to remove (e.g., Fp1-AA -> Fp1)
+
+%% FOLDER CONFIGURATION
+% =================================
+INPUT_FOLDER = fullfile(pwd, 'eeg_files');
+OUTPUT_FOLDER = fullfile(pwd, 'output');
+LOG_FOLDER = fullfile(pwd, 'logs');
+
+%% ========================================================================
+%  END OF USER CONFIGURATION - Do not modify below unless you know what you're doing
+%% ========================================================================
 
 % Create folders if they don't exist
-if ~exist(input_folder, 'dir'), mkdir(input_folder); end
-if ~exist(output_folder, 'dir'), mkdir(output_folder); end
-if ~exist(log_folder, 'dir'), mkdir(log_folder); end
+if ~exist(INPUT_FOLDER, 'dir'), mkdir(INPUT_FOLDER); end
+if ~exist(OUTPUT_FOLDER, 'dir'), mkdir(OUTPUT_FOLDER); end
+if ~exist(LOG_FOLDER, 'dir'), mkdir(LOG_FOLDER); end
 
 % Get .cnt, .edf, and .gdf files from input folder
-cnt_files = dir(fullfile(input_folder, '*.cnt'));
-edf_files = dir(fullfile(input_folder, '*.edf'));
-gdf_files = dir(fullfile(input_folder, '*.gdf'));
+cnt_files = dir(fullfile(INPUT_FOLDER, '*.cnt'));
+edf_files = dir(fullfile(INPUT_FOLDER, '*.edf'));
+gdf_files = dir(fullfile(INPUT_FOLDER, '*.gdf'));
 eeg_files = [cnt_files; edf_files; gdf_files];
 
 % Check if any EEG files were found
 if isempty(eeg_files)
-    fprintf('\nERROR: No EEG files found in %s\n', input_folder);
+    fprintf('\nERROR: No EEG files found in %s\n', INPUT_FOLDER);
     fprintf('Expected file types: .cnt, .edf, .gdf\n');
     fprintf('Please add EEG files to the input folder and run again.\n\n');
     return;
@@ -67,17 +103,21 @@ batch_start_time = tic;
 processing_times = [];
 batch_stats = struct('processed', 0, 'failed', 0, 'total', length(eeg_files));
 
-% Start EEGLAB
-[ALLEEG, EEG, CURRENTSET, ALLCOM] = eeglab;
+% Start EEGLAB (with or without GUI based on configuration)
+if SHOW_EEGLAB_GUI
+    [ALLEEG, EEG, CURRENTSET, ALLCOM] = eeglab;
+else
+    [ALLEEG, EEG, CURRENTSET, ALLCOM] = eeglab('nogui');
+end
 
 % Process each EEG file
 for i = 1:length(eeg_files)
     file_start_time = tic;
-    
+
     filename = eeg_files(i).name;
     filepath = fullfile(eeg_files(i).folder, filename);
     [~, name_no_ext, ext] = fileparts(filename);
-    
+
     % Progress indicator with estimated time remaining
     if i > 1 && ~isempty(processing_times)
         avg_time = mean(processing_times);
@@ -88,28 +128,28 @@ for i = 1:length(eeg_files)
     else
         fprintf('\n[%d/%d] Processing: %s\n', i, length(eeg_files), filename);
     end
-    
+
     % File validation
     if ~exist(filepath, 'file')
         fprintf('[ERROR] File not found: %s\n', filepath);
         batch_stats.failed = batch_stats.failed + 1;
         continue;
     end
-    
+
     file_info = dir(filepath);
     if file_info.bytes == 0
         fprintf('[ERROR] Empty file: %s\n', filename);
         batch_stats.failed = batch_stats.failed + 1;
         continue;
     end
-    
+
     % Smart logging: single file gets individual log, multiple files get batch log
     if length(eeg_files) == 1
-        log_file = fullfile(log_folder, [name_no_ext '_model3_log.txt']);
+        log_file = fullfile(LOG_FOLDER, [name_no_ext '_model3_log.txt']);
     else
-        log_file = fullfile(log_folder, 'Batch_model3_log.txt');
+        log_file = fullfile(LOG_FOLDER, 'Batch_model3_log.txt');
     end
-    
+
     % Open log file (append mode for batch, write mode for single file)
     if length(eeg_files) == 1
         logID = fopen(log_file, 'w');
@@ -120,110 +160,143 @@ for i = 1:length(eeg_files)
             logID = fopen(log_file, 'a');
         end
     end
-    
+
     if logID == -1
         fprintf('[WARNING] Could not create log file for %s, continuing without logging\n', filename);
         logID = 1; % Use stdout as fallback
     end
-    
+
+    % Guarantee log file is closed even if an error occurs
+    if logID ~= 1
+        logCleanup = onCleanup(@() fclose(logID));
+    end
+
     fprintf(logID, '=== Processing: %s ===\n', filename);
     fprintf(logID, 'Started: %s\n', datestr(now));
     fprintf(logID, 'File size: %.2f MB\n\n', file_info.bytes/1024/1024);
-    
-    %% Step 1: Import file with time range 0–180 sec
+
+    %% Step 1: Import file with time range
     step_start = tic;
     try
+        % Build import options based on configuration
+        if isinf(IMPORT_TIME_RANGE_SEC)
+            import_opts = {}; % Import all data
+            time_range_str = 'all';
+        else
+            import_opts = {'blockrange', [0 IMPORT_TIME_RANGE_SEC]};
+            time_range_str = sprintf('0–%d sec', IMPORT_TIME_RANGE_SEC);
+        end
+
         switch lower(ext)
             case '.cnt'
-                EEG = pop_biosig(filepath, 'blockrange', [0 180], ...
+                EEG = pop_biosig(filepath, import_opts{:}, ...
                     'importevent', 'on', 'rmeventchan', 'on', 'importannot', 'on', ...
                     'bdfeventmode', 4, 'blockepoch', 'on');
-                fprintf(logID, 'Imported CNT file using pop_biosig() with time 0–180 sec.\n');            
+                fprintf(logID, 'Imported CNT file using pop_biosig() with time %s.\n', time_range_str);
             case '.edf'
-                EEG = pop_biosig(filepath, 'blockrange', [0 180], ...
+                EEG = pop_biosig(filepath, import_opts{:}, ...
                     'importevent', 'on', 'rmeventchan', 'on', 'importannot', 'on', ...
                     'bdfeventmode', 4, 'blockepoch', 'off');
-                fprintf(logID, 'Imported EDF file using pop_biosig() with time 0–180 sec.\n');
+                fprintf(logID, 'Imported EDF file using pop_biosig() with time %s.\n', time_range_str);
             case '.gdf'
-                EEG = pop_biosig(filepath, 'blockrange', [0 180], ...
+                EEG = pop_biosig(filepath, import_opts{:}, ...
                     'importevent', 'on', 'rmeventchan', 'on', 'importannot', 'on', ...
                     'bdfeventmode', 4, 'blockepoch', 'on');
-                fprintf(logID, 'Imported GDF file using pop_biosig() with time 0–180 sec.\n');            
+                fprintf(logID, 'Imported GDF file using pop_biosig() with time %s.\n', time_range_str);
             otherwise
                 fprintf(logID, 'Unsupported file format: %s\n', ext);
                 fclose(logID);
                 batch_stats.failed = batch_stats.failed + 1;
                 continue;
         end
-        [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, 0);          
-        
+        [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, 0);
+
         % Store initial metrics including signal statistics
         initial_channels = EEG.nbchan;
         initial_events = length(EEG.event);
         initial_duration = EEG.xmax;
         initial_mean_amplitude = mean(abs(EEG.data(:)));
         initial_std_amplitude = std(EEG.data(:));
-        
+
         % Log import results with timing
         step_time = toc(step_start);
         fprintf(logID, 'Step 1 - Import: %d channels, %d events, %.3f sec, %d frames, %.1f Hz (%.2fs)\n', ...
-            EEG.nbchan, length(EEG.event), EEG.xmax, EEG.pnts, EEG.srate, step_time);    catch ME
+            EEG.nbchan, length(EEG.event), EEG.xmax, EEG.pnts, EEG.srate, step_time);
+    catch ME
         fprintf(logID, 'ERROR during import: %s\n', ME.message);
         fprintf('[ERROR] Import failed for %s: %s\n', filename, ME.message);
-        if logID ~= 1, fclose(logID); end
         batch_stats.failed = batch_stats.failed + 1;
-        
+
         % Clean up any partial EEG data
         if exist('EEG', 'var') && ~isempty(EEG)
             clear EEG;
         end
+        clear logCleanup; % Triggers onCleanup to close log file
         continue;
     end
-    
+
+    %% Step 1b: Clean channel labels (remove reference suffixes)
+    if STRIP_CHANNEL_SUFFIXES
+        channels_renamed = 0;
+        for ch = 1:length(EEG.chanlocs)
+            original_label = EEG.chanlocs(ch).labels;
+            new_label = regexprep(original_label, CHANNEL_SUFFIX_PATTERN, '');
+            if ~strcmp(original_label, new_label)
+                EEG.chanlocs(ch).labels = new_label;
+                channels_renamed = channels_renamed + 1;
+            end
+        end
+        EEG = eeg_checkset(EEG);
+        if channels_renamed > 0
+            fprintf(logID, 'Step 1b - Cleaned %d channel labels (removed suffixes matching: %s)\n', ...
+                channels_renamed, CHANNEL_SUFFIX_PATTERN);
+        end
+    end
+
     %% Step 2: Remove unwanted channels (configurable)
     step_start = tic;
-    
+
     % Build comprehensive list of channels to potentially remove
     channels_to_remove = {};
-    
+
     % Reference channels (various naming conventions)
     if REMOVE_REFERENCE_CHANNELS
         ref_channels = {'A1', 'A2', 'M1', 'M2', 'TP9', 'TP10', 'REF', 'Ref', 'ref', ...
-                       'LM', 'RM', 'LEFT_EAR', 'RIGHT_EAR', 'LE', 'RE'};
+            'LM', 'RM', 'LEFT_EAR', 'RIGHT_EAR', 'LE', 'RE'};
         channels_to_remove = [channels_to_remove, ref_channels];
     end
-    
+
     % EOG channels (various naming conventions)
     if REMOVE_EOG_CHANNELS
         eog_channels = {'VEOG', 'veog', 'HEOG', 'heog', 'EOG1', 'EOG2', 'EOG', 'eog', ...
-                       'EOGH', 'EOGV', 'LEOG', 'REOG', 'UPEOG', 'LOWEOG', 'vEOG', 'hEOG', ...
-                       'EOG_L', 'EOG_R', 'EOG_U', 'EOG_D', 'VEOG+', 'VEOG-', 'HEOG+', 'HEOG-'};
+            'EOGH', 'EOGV', 'LEOG', 'REOG', 'UPEOG', 'LOWEOG', 'vEOG', 'hEOG', ...
+            'EOG_L', 'EOG_R', 'EOG_U', 'EOG_D', 'VEOG+', 'VEOG-', 'HEOG+', 'HEOG-'};
         channels_to_remove = [channels_to_remove, eog_channels];
     end
-    
+
     % EMG channels
     if REMOVE_EMG_CHANNELS
         emg_channels = {'EMG', 'emg', 'EMG1', 'EMG2', 'Chin', 'chin', 'CHIN', ...
-                       'EMG_CHIN', 'EMG_L', 'EMG_R', 'EMG_LT', 'EMG_RT'};
+            'EMG_CHIN', 'EMG_L', 'EMG_R', 'EMG_LT', 'EMG_RT'};
         channels_to_remove = [channels_to_remove, emg_channels];
     end
-    
+
     % ECG channels
     if REMOVE_ECG_CHANNELS
         ecg_channels = {'ECG', 'ecg', 'EKG', 'ekg', 'ECG1', 'ECG2', 'HEART', 'heart', ...
-                       'ECG_L', 'ECG_R', 'EKG1', 'EKG2', 'CARD'};
+            'ECG_L', 'ECG_R', 'EKG1', 'EKG2', 'CARD'};
         channels_to_remove = [channels_to_remove, ecg_channels];
     end
-    
+
     % Add manual channels
     channels_to_remove = [channels_to_remove, MANUAL_CHANNELS_TO_REMOVE];
-    
+
     % Get available channels in the data
     available_channels = {EEG.chanlocs.labels};
-    
+
     % Find channels that actually exist in the data and should be removed
     toRemove = intersect(available_channels, channels_to_remove);
-    
+
     % Apply safety filter: remove any protected channels from removal list
     if ~isempty(CHANNELS_TO_NEVER_REMOVE)
         protected_found = intersect(toRemove, CHANNELS_TO_NEVER_REMOVE);
@@ -233,7 +306,7 @@ for i = 1:length(eeg_files)
             toRemove = setdiff(toRemove, CHANNELS_TO_NEVER_REMOVE);
         end
     end
-    
+
     % Log what was found and what will be removed
     fprintf(logID, 'Channel removal configuration:\n');
     fprintf(logID, '  Reference channels: %s, EOG channels: %s\n', ...
@@ -244,7 +317,7 @@ for i = 1:length(eeg_files)
         fprintf(logID, '  Manual removal list: %s\n', strjoin(MANUAL_CHANNELS_TO_REMOVE, ', '));
     end
     fprintf(logID, '  Available channels (%d): %s\n', length(available_channels), strjoin(available_channels, ', '));
-    
+
     % Perform channel removal
     if ~isempty(toRemove)
         EEG = pop_select(EEG, 'nochannel', toRemove);
@@ -254,26 +327,26 @@ for i = 1:length(eeg_files)
     else
         step_time = toc(step_start);
         fprintf(logID, 'Step 2 - No channels removed (no matching channels found, %.2fs)\n', step_time);
-    end    
-    
-    %% Step 3: Downsample to 125 Hz
+    end
+
+    %% Step 3: Downsample to target sample rate
     step_start = tic;
-    if EEG.srate ~= 125
-        EEG = pop_resample(EEG, 125);
+    if EEG.srate ~= TARGET_SAMPLE_RATE_HZ
+        EEG = pop_resample(EEG, TARGET_SAMPLE_RATE_HZ);
         step_time = toc(step_start);
-        fprintf(logID, 'Step 3 - Downsampled to 125 Hz (%.2fs)\n', step_time);
+        fprintf(logID, 'Step 3 - Downsampled to %d Hz (%.2fs)\n', TARGET_SAMPLE_RATE_HZ, step_time);
     else
         step_time = toc(step_start);
-        fprintf(logID, 'Step 3 - Already at 125 Hz, no resampling needed (%.2fs)\n', step_time);    
+        fprintf(logID, 'Step 3 - Already at %d Hz, no resampling needed (%.2fs)\n', TARGET_SAMPLE_RATE_HZ, step_time);
     end
-    
-    %% Step 4: Bandpass filter: 0.5–40 Hz
+
+    %% Step 4: Bandpass filter
     step_start = tic;
-    EEG = pop_eegfiltnew(EEG, 0.5, 40, [], 0, [], 1);
+    EEG = pop_eegfiltnew(EEG, FILTER_LOW_HZ, FILTER_HIGH_HZ, [], 0, [], 1);
     step_time = toc(step_start);
-    fprintf(logID, 'Step 4 - Applied bandpass filter: 0.5–40 Hz (%.2fs)\n', step_time);    
-    
-    %% Step 5: Clean raw data with parameters matching manual process
+    fprintf(logID, 'Step 4 - Applied bandpass filter: %.1f–%d Hz (%.2fs)\n', FILTER_LOW_HZ, FILTER_HIGH_HZ, step_time);
+
+    %% Step 5: Clean raw data with ASR
     step_start = tic;
     data_before_cleaning = size(EEG.data, 2);
     EEG = pop_clean_rawdata(EEG, ...
@@ -281,25 +354,25 @@ for i = 1:length(eeg_files)
         'ChannelCriterion', 'off', ...
         'LineNoiseCriterion', 'off', ...
         'Highpass', 'off', ...
-        'BurstCriterion', 20, ...
-        'WindowCriterion', 0.25, ...
+        'BurstCriterion', ASR_BURST_CRITERION, ...
+        'WindowCriterion', ASR_WINDOW_CRITERION, ...
         'BurstRejection', 'on', ...
         'Distance', 'Euclidian', ...
-        'WindowCriterionTolerances', [-Inf 7]);
+        'WindowCriterionTolerances', ASR_WINDOW_TOLERANCES);
     data_after_cleaning = size(EEG.data, 2);
     data_retention = (data_after_cleaning / data_before_cleaning) * 100;
     step_time = toc(step_start);
     fprintf(logID, 'Step 5 - Applied clean_rawdata (%d events after cleaning, %.1f%% data retained, %.2fs)\n', ...
-        length(EEG.event), data_retention, step_time);    
-        
+        length(EEG.event), data_retention, step_time);
+
     %% Step 6: Add channel locations (Dynamic selection based on channel count)
     step_start = tic;
     channel_locations_added = false;
-    
+
     % Determine appropriate channel location file based on number of channels
     num_channels = EEG.nbchan;
     fprintf(logID, 'Detected %d channels, selecting appropriate channel location file...\n', num_channels);
-    
+
     % Channel location file priority list based on channel count
     if num_channels <= 19
         chan_files = {'Standard-10-20-Cap19.ced'};
@@ -323,7 +396,7 @@ for i = 1:length(eeg_files)
         chan_files = {'Standard-10-5-Cap128.ced'};
         montage_type = 'high-density montage';
     end
-    
+
     % Try each channel location file in order of preference
     for file_idx = 1:length(chan_files)
         current_file = chan_files{file_idx};
@@ -353,26 +426,33 @@ for i = 1:length(eeg_files)
                 % Continue to next file
             end
         end
-        
+
         % Log attempt if not the last file
         if file_idx < length(chan_files)
             fprintf(logID, '  %s not found, trying next option...\n', current_file);
         end
     end
-    
+
     % Final fallback and warning if no channel locations were added
     if ~channel_locations_added
         step_time = toc(step_start);
         fprintf(logID, 'Step 6 - WARNING: Could not add channel locations for %d channels (%.2fs)\n', num_channels, step_time);
-        fprintf('[WARNING] Channel locations not added for %s (%d channels) - ICLabel may fail\n', filename, num_channels);
-        fprintf('[INFO] Available files searched: %s\n', strjoin(chan_files, ', '));
+        fprintf(logID, '  >>> ICA ARTIFACT REMOVAL WILL BE SKIPPED FOR THIS FILE <<<\n');
+        fprintf(logID, '  ICLabel requires channel locations to classify components.\n');
+        fprintf('\n');
+        fprintf('  *************************************************************\n');
+        fprintf('  * WARNING: Channel locations not added for %s\n', filename);
+        fprintf('  * ICA ARTIFACT REMOVAL WILL BE SKIPPED FOR THIS FILE\n');
+        fprintf('  * Channels: %d | Files searched: %s\n', num_channels, strjoin(chan_files, ', '));
+        fprintf('  *************************************************************\n');
+        fprintf('\n');
     end
-    
+
     % Store initial PSD for before/after ICA comparison (after basic preprocessing)
     try
         fs_initial = EEG.srate;
         nfft_initial = min(2^nextpow2(EEG.pnts), 2048);
-        
+
         % Calculate PSD for each channel separately, then average the PSDs
         % This preserves frequency content better than averaging signals first
         channel_psds = [];
@@ -382,14 +462,14 @@ for i = 1:length(eeg_files)
         end
         % Average the PSDs across channels (not the raw signals)
         psd_initial = mean(channel_psds, 1);
-        
+
         % Calculate initial band powers (after basic preprocessing, before ICA)
         delta_initial = freqs_initial >= 0.5 & freqs_initial <= 4;
         theta_initial = freqs_initial >= 4 & freqs_initial <= 8;
         alpha_initial = freqs_initial >= 8 & freqs_initial <= 13;
         beta_initial = freqs_initial >= 13 & freqs_initial <= 30;
         gamma_initial = freqs_initial >= 30 & freqs_initial <= 40;
-        
+
         % Use mean instead of sum for band powers, convert to dB
         initial_delta_power = 10*log10(mean(psd_initial(delta_initial)));
         initial_theta_power = 10*log10(mean(psd_initial(theta_initial)));
@@ -401,7 +481,7 @@ for i = 1:length(eeg_files)
         initial_delta_power = NaN; initial_theta_power = NaN; initial_alpha_power = NaN;
         initial_beta_power = NaN; initial_gamma_power = NaN; initial_total_power = NaN;
     end
-    
+
     %% Step 7: Run ICA decomposition
     step_start = tic;
     try
@@ -414,12 +494,12 @@ for i = 1:length(eeg_files)
         fprintf(logID, 'Step 7 - ERROR: ICA decomposition failed: %s (%.2fs)\n', ME.message, step_time);
         fprintf('[ERROR] ICA failed for %s: %s\n', filename, ME.message);
         % Continue without ICA if it fails
-    end      
-    
+    end
+
     %% Step 8: Classify components using ICLabel
     step_start = tic;
     components_removed = [];
-    
+
     % Check if ICA was successful and channel locations are available
     if ~exist('EEG', 'var') || isempty(EEG.icaweights)
         step_time = toc(step_start);
@@ -432,40 +512,39 @@ for i = 1:length(eeg_files)
         try
             % Run ICLabel to classify ICA components
             EEG = pop_iclabel(EEG, 'default');
-            
+
             % Get ICLabel classifications
-            % 70% threshold for brain components
-            brain_threshold = 0.7;
+            % Use configurable threshold for brain components
             classifications = EEG.etc.ic_classification.ICLabel.classifications;
-            
-            % Simple logic: Keep only components where Brain > 70%, remove all others
+
+            % Simple logic: Keep only components where Brain > threshold, remove all others
             components_to_remove = [];
-            
+
             for comp = 1:size(classifications, 1)
                 % classifications columns: [Brain, Muscle, Eye, Heart, Line Noise, Channel Noise, Other]
                 brain_prob = classifications(comp, 1);
-                
+
                 % Find the dominant classification for proper labeling
                 [max_prob, max_idx] = max(classifications(comp, :));
                 component_types = {'Brain', 'Muscle', 'Eye', 'Heart', 'Line Noise', 'Channel Noise', 'Other'};
                 dominant_type = component_types{max_idx};
-                
-                % Remove if brain probability <= 70%
-                if brain_prob <= brain_threshold
+
+                % Remove if brain probability <= threshold
+                if brain_prob <= BRAIN_THRESHOLD
                     components_to_remove(end+1) = comp;
-                    fprintf(logID, '  Component %d: %s %.1f%% (Brain %.1f%% <= 70%%) - marked for removal\n', ...
-                        comp, dominant_type, max_prob*100, brain_prob*100);
+                    fprintf(logID, '  Component %d: %s %.1f%% (Brain %.1f%% <= %.0f%%) - marked for removal\n', ...
+                        comp, dominant_type, max_prob*100, brain_prob*100, BRAIN_THRESHOLD*100);
                 else
-                    fprintf(logID, '  Component %d: %s %.1f%% (Brain %.1f%% > 70%%) - retained\n', ...
-                        comp, dominant_type, max_prob*100, brain_prob*100);
+                    fprintf(logID, '  Component %d: %s %.1f%% (Brain %.1f%% > %.0f%%) - retained\n', ...
+                        comp, dominant_type, max_prob*100, brain_prob*100, BRAIN_THRESHOLD*100);
                 end
             end
-            
+
             step_time = toc(step_start);
             fprintf(logID, 'Step 8 - ICLabel classification completed, %d components marked for removal (%.2fs)\n', ...
                 length(components_to_remove), step_time);
             components_removed = components_to_remove;
-            
+
         catch ME
             step_time = toc(step_start);
             fprintf(logID, 'Step 8 - WARNING: ICLabel classification failed: %s (%.2fs)\n', ME.message, step_time);
@@ -473,7 +552,7 @@ for i = 1:length(eeg_files)
             % Continue without ICLabel if it fails
         end
     end
-    
+
     %% Step 9: Remove artifact components
     step_start = tic;
     if ~isempty(components_removed) && exist('classifications', 'var')
@@ -483,7 +562,7 @@ for i = 1:length(eeg_files)
             step_time = toc(step_start);
             fprintf(logID, 'Step 9 - Removed %d artifact components: [%s] (%.2fs)\n', ...
                 length(components_removed), num2str(components_removed), step_time);
-            
+
             % Log details of removed components
             total_components = size(classifications, 1);
             brain_components = total_components - length(components_removed);
@@ -502,7 +581,7 @@ for i = 1:length(eeg_files)
             fprintf(logID, 'Step 9 - No artifact components identified for removal (%.2fs)\n', step_time);
         end
     end
-    
+
     %% Step 10: Re-reference to average
     step_start = tic;
     if ~strcmpi(EEG.ref, 'averef')
@@ -513,28 +592,28 @@ for i = 1:length(eeg_files)
         step_time = toc(step_start);
         fprintf(logID, 'Step 10 - Already average referenced, no change needed (%.2fs)\n', step_time);
     end
-    
+
     %% Step 11: Save as EDF
     step_start = tic;
     try
         EEG = eeg_checkset(EEG);
-        out_file = fullfile(output_folder, [name_no_ext '_model3_preprocessed.edf']);
+        out_file = fullfile(OUTPUT_FOLDER, [name_no_ext '_model3_preprocessed.edf']);
         pop_writeeeg(EEG, out_file, 'TYPE', 'EDF');
         step_time = toc(step_start);
         fprintf(logID, 'Step 11 - Saved preprocessed EDF: %s (%.2fs)\n', [name_no_ext '_model3_preprocessed.edf'], step_time);
-        
+
         % Calculate total processing time and quality metrics
         total_processing_time = toc(file_start_time);
-        processing_times(end+1) = total_processing_time;          
-        
+        processing_times(end+1) = total_processing_time;
+
         % Calculate final signal statistics
         final_mean_amplitude = mean(abs(EEG.data(:)));
         final_std_amplitude = std(EEG.data(:));
         amplitude_ratio = final_mean_amplitude / initial_mean_amplitude;
         std_ratio = final_std_amplitude / initial_std_amplitude;
-        
+
         % Enhanced quality validation metrics
-        
+
         % 1. Signal-to-Noise Ratio calculation (simplified estimate)
         % Use the ratio of signal variance to estimate noise reduction
         if initial_std_amplitude > 0 && final_std_amplitude > 0
@@ -542,13 +621,13 @@ for i = 1:length(eeg_files)
         else
             snr_improvement = NaN;
         end
-        
+
         % 2. Power Spectral Density Analysis
         try
             % Calculate PSD for key frequency bands
             fs = EEG.srate;
             nfft = min(2^nextpow2(EEG.pnts), 2048); % Limit FFT size for efficiency
-            
+
             % Calculate PSD for each channel separately, then average the PSDs
             % This preserves frequency content better than averaging signals first
             channel_psds = [];
@@ -558,25 +637,25 @@ for i = 1:length(eeg_files)
             end
             % Average the PSDs across channels (not the raw signals)
             psd = mean(channel_psds, 1);
-            
+
             % Define frequency bands
             delta_band = freqs >= 0.5 & freqs <= 4;
             theta_band = freqs >= 4 & freqs <= 8;
             alpha_band = freqs >= 8 & freqs <= 13;
             beta_band = freqs >= 13 & freqs <= 30;
             gamma_band = freqs >= 30 & freqs <= 40;
-            
+
             % Calculate band power (log scale for better interpretation)
             delta_power = 10*log10(mean(psd(delta_band)));
             theta_power = 10*log10(mean(psd(theta_band)));
             alpha_power = 10*log10(mean(psd(alpha_band)));
             beta_power = 10*log10(mean(psd(beta_band)));
             gamma_power = 10*log10(mean(psd(gamma_band)));
-            
+
             % Total power and relative band powers
             total_power = 10*log10(mean(psd(freqs >= 0.5 & freqs <= 40)));
             alpha_beta_ratio = alpha_power - beta_power; % Alpha dominance indicator
-            
+
             % Calculate power changes from initial to final
             if ~isnan(initial_delta_power)
                 delta_change = delta_power - initial_delta_power;
@@ -589,7 +668,7 @@ for i = 1:length(eeg_files)
                 delta_change = NaN; theta_change = NaN; alpha_change = NaN;
                 beta_change = NaN; gamma_change = NaN; total_power_change = NaN;
             end
-            
+
         catch
             delta_power = NaN; theta_power = NaN; alpha_power = NaN;
             beta_power = NaN; gamma_power = NaN; total_power = NaN;
@@ -597,17 +676,17 @@ for i = 1:length(eeg_files)
             delta_change = NaN; theta_change = NaN; alpha_change = NaN;
             beta_change = NaN; gamma_change = NaN; total_power_change = NaN;
         end
-        
+
         % 3. Advanced Statistical Measures
         try
             % Kurtosis and skewness for artifact detection
             data_kurtosis = mean(kurtosis(EEG.data, 1, 2)); % Average across channels
             data_skewness = mean(skewness(EEG.data, 1, 2));
-            
+
             % Channel-wise signal quality
             channel_std = std(EEG.data, 0, 2); % Standard deviation per channel
             channel_quality = std(channel_std) / mean(channel_std); % Coefficient of variation
-            
+
             % Temporal stability (sliding window variance)
             window_size = round(fs * 2); % 2-second windows
             if EEG.pnts > window_size * 2
@@ -623,27 +702,32 @@ for i = 1:length(eeg_files)
             else
                 temporal_stability = NaN;
             end
-            
+
         catch
             data_kurtosis = NaN; data_skewness = NaN;
             channel_quality = NaN; temporal_stability = NaN;
         end
-        
-        % 4. Artifact reduction estimate
-        artifact_reduction_estimate = initial_std_amplitude / final_std_amplitude;
-        
+
+        % 4. Artifact reduction estimate (with division by zero guard)
+        if final_std_amplitude > 0
+            artifact_reduction_estimate = initial_std_amplitude / final_std_amplitude;
+        else
+            artifact_reduction_estimate = NaN;
+            fprintf(logID, '  WARNING: Final signal has zero variability - possible over-processing\n');
+        end
+
         % 5. Component classification summary and ICA consistency metrics
         if exist('classifications', 'var')
             % Count ALL components by their dominant classification
             total_components = size(classifications, 1);
             [~, all_dominant_classes] = max(classifications, [], 2);
-            
+
             % Create mask for retained components (not in removal list)
             retained_mask = true(total_components, 1);
             if ~isempty(components_removed)
                 retained_mask(components_removed) = false;
             end
-            
+
             % Count RETAINED components by dominant class
             brain_components = sum(all_dominant_classes == 1 & retained_mask);
             muscle_components = sum(all_dominant_classes == 2 & retained_mask);
@@ -652,7 +736,7 @@ for i = 1:length(eeg_files)
             line_noise_components = sum(all_dominant_classes == 5 & retained_mask);
             channel_noise_components = sum(all_dominant_classes == 6 & retained_mask);
             other_components = sum(all_dominant_classes == 7 & retained_mask);
-            
+
             % Count REMOVED components by dominant class for detailed reporting
             removed_brain = sum(all_dominant_classes == 1 & ~retained_mask);
             removed_muscle = sum(all_dominant_classes == 2 & ~retained_mask);
@@ -661,28 +745,28 @@ for i = 1:length(eeg_files)
             removed_line_noise = sum(all_dominant_classes == 5 & ~retained_mask);
             removed_channel_noise = sum(all_dominant_classes == 6 & ~retained_mask);
             removed_other = sum(all_dominant_classes == 7 & ~retained_mask);
-            
+
             % Group non-brain categories for summary display
             other_artifacts = heart_components + line_noise_components + channel_noise_components + other_components;
             total_artifacts_removed = removed_muscle + removed_eye + removed_heart + ...
-                                    removed_line_noise + removed_channel_noise + ...
-                                    removed_other + removed_brain;
-            
+                removed_line_noise + removed_channel_noise + ...
+                removed_other + removed_brain;
+
             % Classification consistency score (how confident ICLabel was)
             max_probs = max(classifications, [], 2);
             classification_confidence = mean(max_probs);
-            
+
             % ICA consistency metrics
             brain_probs = classifications(:,1);
             brain_consistency = std(brain_probs(brain_probs > 0.7)); % Variability in brain component confidence
             if isempty(brain_probs(brain_probs > 0.7)) || length(brain_probs(brain_probs > 0.7)) < 2
                 brain_consistency = 0; % Perfect consistency if only one or no brain components
             end
-            
+
             % Component separation quality (how well separated are the classes)
             prob_entropy = -sum(classifications .* log2(classifications + eps), 2); % Information entropy per component
             avg_component_entropy = mean(prob_entropy); % Lower = better separation
-            
+
         else
             brain_components = NaN; muscle_components = NaN; eye_components = NaN;
             heart_components = NaN; line_noise_components = NaN; channel_noise_components = NaN;
@@ -692,7 +776,7 @@ for i = 1:length(eeg_files)
             removed_line_noise = 0; removed_channel_noise = 0; removed_other = 0;
             total_artifacts_removed = 0;
         end
-        
+
         % Final summary with enhanced quality metrics
         fprintf(logID, '\n=== PROCESSING COMPLETE ===\n');
         fprintf(logID, 'Total processing time: %.2f seconds\n', total_processing_time);
@@ -711,7 +795,7 @@ for i = 1:length(eeg_files)
         % Only warn if reductions are truly extreme (>20x amplitude or >200x variability)
         amplitude_warning = amplitude_ratio < 0.05; % Less than 1/20th
         variability_warning = std_ratio < 0.005; % Less than 1/200th
-        
+
         if amplitude_warning || variability_warning
             if amplitude_warning
                 fprintf(logID, '  Signal amplitude: %.2f → %.2f µV (%.2fx) - WARNING: Extreme reduction (>20x)\n', ...
@@ -720,7 +804,7 @@ for i = 1:length(eeg_files)
                 fprintf(logID, '  Signal amplitude: %.2f → %.2f µV (%.2fx)\n', ...
                     initial_mean_amplitude, final_mean_amplitude, amplitude_ratio);
             end
-            
+
             if variability_warning
                 fprintf(logID, '  Signal variability: %.2f → %.2f µV (%.2fx) - WARNING: Possible over-processing (>200x)\n', ...
                     initial_std_amplitude, final_std_amplitude, std_ratio);
@@ -734,7 +818,7 @@ for i = 1:length(eeg_files)
             fprintf(logID, '  Signal variability: %.2f → %.2f µV (%.2fx)\n', ...
                 initial_std_amplitude, final_std_amplitude, std_ratio);
         end
-        
+
         % Enhanced quality metrics (only print if valid)
         if ~isnan(snr_improvement)
             fprintf(logID, '  SNR improvement: %.1f dB\n', snr_improvement);
@@ -747,7 +831,7 @@ for i = 1:length(eeg_files)
                 fprintf(logID, '  Artifact reduction estimate: %.2fx\n', artifact_reduction_estimate);
             end
         end
-        
+
         % Power Spectral Density metrics
         if ~isnan(total_power)
             fprintf(logID, '  Spectral Analysis:\n');
@@ -758,7 +842,7 @@ for i = 1:length(eeg_files)
             if ~isnan(alpha_beta_ratio)
                 fprintf(logID, '    Alpha/Beta ratio: %.1f dB\n', alpha_beta_ratio);
             end
-            
+
             % Before/after power comparison with validation
             if ~isnan(total_power_change)
                 % Flag unrealistic power changes (likely calculation error)
@@ -778,7 +862,7 @@ for i = 1:length(eeg_files)
                     alpha_change, beta_change, gamma_change);
             end
         end
-        
+
         % Advanced statistical measures
         if ~isnan(data_kurtosis)
             fprintf(logID, '  Statistical Quality:\n');
@@ -790,7 +874,7 @@ for i = 1:length(eeg_files)
                 fprintf(logID, '    Temporal stability: %.3f\n', temporal_stability);
             end
         end
-        
+
         % ICA and component metrics
         if ~isnan(classification_confidence)
             fprintf(logID, '  ICA Quality:\n');
@@ -815,16 +899,17 @@ for i = 1:length(eeg_files)
         fprintf(logID, 'Final: %d channels, %d events, %.3f sec, %d frames, %.1f Hz\n', ...
             EEG.nbchan, length(EEG.event), EEG.xmax, EEG.pnts, EEG.srate);
         fprintf(logID, '============================\n\n');
-        
+
         batch_stats.processed = batch_stats.processed + 1;
         fprintf('[SUCCESS] %s processed in %.2f seconds\n', filename, total_processing_time);
-          catch ME
+    catch ME
         fprintf(logID, 'ERROR saving EDF: %s\n', ME.message);
         fprintf('[ERROR] Failed to save %s: %s\n', filename, ME.message);
         batch_stats.failed = batch_stats.failed + 1;
     end
 
-    if logID ~= 1, fclose(logID); end
+    % onCleanup handles fclose automatically when logCleanup goes out of scope
+    clear logCleanup;
 end
 
 % Display final batch summary
@@ -853,4 +938,9 @@ else
     fprintf('\nBatch log file created: Batch_model3_log.txt\n');
 end
 
-fprintf('EDF files saved in: %s\nLogs saved in: %s\n', output_folder, log_folder);
+fprintf('EDF files saved in: %s\nLogs saved in: %s\n', OUTPUT_FOLDER, LOG_FOLDER);
+
+% Refresh EEGLAB GUI if it was shown
+if SHOW_EEGLAB_GUI
+    eeglab redraw;
+end

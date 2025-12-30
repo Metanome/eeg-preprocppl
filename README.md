@@ -12,13 +12,14 @@
 
 ### Basic Usage
 1. **Place EEG files** in `eeg_files/` folder (supports CNT, EDF, GDF formats)
-2. **Choose processing model**:
+2. **Configure settings** at the top of the script (see Configuration Options below)
+3. **Choose processing model**:
    - **Model 2**: Run `model2_eeg_prep.m` for basic preprocessing (7 steps)
    - **Model 3**: Run `model3_eeg_prep.m` for advanced ICA preprocessing (11 steps)
-3. **Processed files** saved to `output/` folder:
+4. **Processed files** saved to `output/` folder:
    - Model 2: `[filename]_model2_preprocessed.edf`
    - Model 3: `[filename]_model3_preprocessed.edf`
-4. **Processing logs** saved to `logs/` folder:
+5. **Processing logs** saved to `logs/` folder:
    - Single file: `[filename]_model2_log.txt` or `[filename]_model3_log.txt`
    - Batch mode: `Batch_model2_log.txt` or `Batch_model3_log.txt`
 
@@ -31,25 +32,27 @@
 
 ### Model 2: Basic Preprocessing (`model2_eeg_prep.m`)
 **7-step basic preprocessing pipeline** without ICA:
-1. Import with time range (0-180 sec)
+1. Import with configurable time range
+1b. Clean channel labels (remove reference suffixes like -AA, -Ref)
 2. Remove unwanted channels (configurable: reference, EOG, EMG, ECG)
-3. Downsample to 125 Hz
-4. Bandpass filter (0.5-40 Hz)
+3. Downsample to target sample rate
+4. Bandpass filter
 5. Clean raw data (artifact removal with ASR)
 6. Re-reference to average
 7. Save as preprocessed EDF
 
 ### Model 3: Advanced ICA Pipeline (`model3_eeg_prep.m`)
 **11-step advanced preprocessing pipeline** with automated ICA artifact removal:
-1. Import with time range (0-180 sec)
+1. Import with configurable time range
+1b. Clean channel labels (remove reference suffixes like -AA, -Ref)
 2. Remove unwanted channels (configurable: reference, EOG, EMG, ECG)
-3. Downsample to 125 Hz
-4. Bandpass filter (0.5-40 Hz)
+3. Downsample to target sample rate
+4. Bandpass filter
 5. Clean raw data (artifact removal with ASR)
 6. Add channel locations (Dynamic montage detection: 19/21/25/32/64/128 channels)
 7. Run ICA decomposition
 8. Classify components using ICLabel
-9. Remove artifact components (Brain ≥70% retained, others removed)
+9. Remove artifact components (configurable brain threshold, default ≥70%)
 10. Re-reference to average
 11. Save as preprocessed EDF
 
@@ -66,15 +69,64 @@
 3.  **Run the script**.
 4.  **Standardized files** are saved to the `output/` folder with a `_prepared.edf` suffix.
 
+Features:
+- Automatic channel suffix stripping (e.g., `Fp1-AA` → `Fp1`)
+- Configurable channel renaming map
+- Headless mode support (`SHOW_EEGLAB_GUI = false`)
+- Target channel validation
+
 
 ## Key Features
 
 ### Core Processing Capabilities
 - **Multi-format support**: CNT, EDF, and GDF file formats
 - **Flexible channel removal**: Configurable removal of reference, EOG, EMG, ECG channels with safety protections
+- **Channel name cleaning**: Automatic removal of reference suffixes (e.g., Fp1-AA → Fp1)
 - **Dynamic channel location assignment**: Automatic montage selection (19-128 channels)
 - **Automated ICA artifact removal** (Model 3): Extended Infomax with ICLabel classification
-- **Robust error handling**: Graceful failure recovery with detailed error reporting
+- **Headless mode**: Run without EEGLAB GUI for efficient batch processing
+- **Robust error handling**: Graceful failure recovery with `onCleanup` pattern for guaranteed log file closure
+
+## Configuration Options
+
+All scripts feature a centralized **USER CONFIGURATION** section at the top:
+
+### Processing Parameters
+```matlab
+IMPORT_TIME_RANGE_SEC = 180;         % Import first N seconds (set to Inf for all data)
+TARGET_SAMPLE_RATE_HZ = 125;         % Target sample rate after downsampling
+FILTER_LOW_HZ = 0.5;                 % Bandpass filter low cutoff (Hz)
+FILTER_HIGH_HZ = 40;                 % Bandpass filter high cutoff (Hz)
+```
+
+### ICA Parameters (Model 3 only)
+```matlab
+BRAIN_THRESHOLD = 0.7;               % ICLabel: minimum brain probability to keep component
+```
+
+### ASR Parameters
+```matlab
+ASR_BURST_CRITERION = 20;            % Threshold for burst removal (lower = more aggressive)
+ASR_WINDOW_CRITERION = 0.25;         % Proportion of bad channels to trigger window rejection
+```
+
+### Channel Name Cleaning
+```matlab
+STRIP_CHANNEL_SUFFIXES = true;       % Remove reference suffixes from channel names
+CHANNEL_SUFFIX_PATTERN = '-(AA|Ref)$';  % Regex pattern for suffixes to remove
+```
+
+### Display Configuration
+```matlab
+SHOW_EEGLAB_GUI = false;             % Set to true to show EEGLAB GUI during processing
+```
+
+### Folder Configuration
+```matlab
+INPUT_FOLDER = fullfile(pwd, 'eeg_files'); % Input data location
+OUTPUT_FOLDER = fullfile(pwd, 'output');   % Output data location
+LOG_FOLDER = fullfile(pwd, 'logs');        % Log file location
+```
 
 ### Channel Removal Configuration
 Both models support **flexible channel removal configuration**:
@@ -172,13 +224,13 @@ The automated ICA workflow replicates the manual EEGLAB process:
 - **Channel Location Assignment**: Dynamic selection based on channel count
 - **ICA Decomposition**: Extended Infomax algorithm via `pop_runica`
 - **Component Classification**: ICLabel automatic classification
-- **Artifact Removal**: Threshold-based removal (Brain probability ≥ 70%)
+- **Artifact Removal**: Configurable threshold-based removal (default: Brain probability ≥ 70%)
 
 ### File Processing Architecture
 - **Batch processing**: Multiple files processed automatically with progress tracking
 - **Error recovery**: Failed files logged and skipped, processing continues
-- **Memory management**: Automatic cleanup between files
-- **Smart logging**: Single file or consolidated batch logs
+- **Memory management**: Automatic cleanup between files with `onCleanup` pattern
+- **Smart logging**: Single file or consolidated batch logs with guaranteed file closure
 - **Output format**: Model-specific EDF files with suffixes `_model2_preprocessed.edf` and `_model3_preprocessed.edf`
 - **Progress indication**: Real-time processing status with time estimates
 - **Quality validation**: Automatic warnings for unusual signal changes or processing issues
@@ -187,15 +239,17 @@ The automated ICA workflow replicates the manual EEGLAB process:
 
 ### Common Issues
 - **Dynamic channel location assignment**: Supports 19-128 channel montages with automatic fallbacks
-- **ICLabel requires channel locations**: System automatically selects appropriate montage file
-- **Memory issues with large files**: Consider processing smaller time segments
+- **ICLabel requires channel locations**: System automatically selects appropriate montage file; prominent warning if locations cannot be added
+- **Memory issues with large files**: Reduce `IMPORT_TIME_RANGE_SEC` or set to smaller value
 - **File format compatibility**: Test with single files first before batch processing
-- **Log file access**: Logs are created during processing; ensure write permissions to logs folder
+- **Channel suffix issues**: Enable `STRIP_CHANNEL_SUFFIXES` to remove -AA, -Ref suffixes
+- **GUI not showing**: Set `SHOW_EEGLAB_GUI = true` if you need the EEGLAB interface
 - **Missing dependencies**: Ensure EEGLAB and ICLabel plugin are properly installed
 
 ### Error Recovery Features
 - **Graceful failure handling**: Failed files are logged and skipped, allowing batch processing to continue
-- **Memory management**: Automatic cleanup between files to prevent memory issues
+- **Memory management**: Automatic cleanup between files with `onCleanup` pattern
+- **Log file safety**: `onCleanup` guarantees log files are closed even on errors
 - **Progress tracking**: Real-time progress indicators with estimated completion times
 - **Quality validation**: Automatic detection of over-processing or unusual signal changes
 

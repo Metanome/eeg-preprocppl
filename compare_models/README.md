@@ -86,21 +86,30 @@ All results saved in `results/` folder with unique timestamps:
 - ⚠ **Folders exist but no EDF files found**: Check file placement
 - ✗ **Missing folders**: Set up folder structure correctly
 
+## Configuration
+
+At the top of `compare_models.m`, you can modify:
+
+```matlab
+RUN_MODE = 'interactive';  % 'interactive' or 'batch_all'
+SHOW_EEGLAB_GUI = false;   % Set to true to show EEGLAB GUI
+```
+
 ## Batch Mode
 
 For automated processing without interaction:
 ```matlab
 % In compare_models.m, change:
-run_mode = 'batch_all';  % Instead of 'interactive'
+RUN_MODE = 'batch_all';  % Instead of 'interactive'
 ```
 
 ## Requirements
 
-- **EEGLAB** installed and running
+- **EEGLAB** installed and in MATLAB path
+- **Signal Processing Toolbox** (for PSD calculations)
 - **Proper folder structure** as described above
 - **Matching files** between comparison groups
 - **EDF file format** for all processed files
-- **Consistent naming** for automatic file pairing
 
 ## Tips for Best Results
 
