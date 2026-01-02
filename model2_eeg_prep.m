@@ -334,7 +334,7 @@ for i = 1:length(eeg_files)
 
     %% Step 4: Bandpass filter
     step_start = tic;
-    EEG = pop_eegfiltnew(EEG, FILTER_LOW_HZ, FILTER_HIGH_HZ, [], 0, [], 1);
+    EEG = pop_eegfiltnew(EEG, FILTER_LOW_HZ, FILTER_HIGH_HZ, [], 0, [], 0);
     step_time = toc(step_start);
     fprintf(logID, 'Step 4 - Applied bandpass filter: %.1f–%d Hz (%.2fs)\n', FILTER_LOW_HZ, FILTER_HIGH_HZ, step_time);
 
