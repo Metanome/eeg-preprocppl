@@ -155,6 +155,29 @@ CHANNELS_TO_NEVER_REMOVE = {'Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', ..
   - Data retention analysis and processing effectiveness
   - Statistical quality measures (kurtosis, skewness, channel consistency)
 
+## ASR Parameter Optimization
+
+The `optimize_asr_parameters.m` tool helps find optimal ASR settings for your dataset.
+
+### Usage
+```matlab
+optimize_asr_parameters  % Run from MATLAB
+```
+
+### Configuration
+```matlab
+BURST_VALUES = [20, 30, 40, 50];           % Values to test
+WINDOW_VALUES = {0.25, 0.5, 0.75, 'off'};  % Values to test
+TARGET_RETENTION = 0.90;                   % Target 90% data retention
+MAX_FILES_TO_TEST = 5;                     % Test subset of files (or 'all')
+```
+
+### Output
+- Results table with retention, SNR, kurtosis, and quality scores
+- Per-file breakdown showing which files pass/fail
+- Recommendation for optimal settings
+- CSV report saved to `logs/asr_optimization_results.csv`
+
 ## Comparison Analysis
 
 ### Setup and Usage
