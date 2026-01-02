@@ -108,6 +108,7 @@ BRAIN_THRESHOLD = 0.7;               % ICLabel: minimum brain probability to kee
 ```matlab
 ASR_BURST_CRITERION = 20;            % Threshold for burst removal (lower = more aggressive)
 ASR_WINDOW_CRITERION = 0.25;         % Proportion of bad channels to trigger window rejection
+ASR_WINDOW_TOLERANCES = [-Inf 7];    % Tolerance range for window rejection
 ```
 
 ### Channel Name Cleaning
@@ -224,6 +225,7 @@ Model2-EEG-Pipeline/
 ├── model3_eeg_prep.m          # Advanced ICA preprocessing script (11 steps)
 ├── prepare_external_data.m    # External data standardization script
 ├── compare_models.m           # Automated comparison analysis tool
+├── optimize_asr_parameters.m  # ASR parameter optimization tool
 ├── eeg_files/                 # Input for all EEG files
 ├── output/                    # Output for all processed files
 ├── logs/                      # Processing logs and reports
