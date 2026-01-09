@@ -33,7 +33,7 @@ LOG_FOLDER = fullfile(pwd, 'logs');
 %% FILE SUBSET OPTION
 % Set to a number to test only that many files (randomly selected)
 % Set to 'all' to test all files in the folder
-MAX_FILES_TO_TEST = 5;                 % e.g., 5 or 'all'
+MAX_FILES_TO_TEST = 10;                % e.g., 5 or 'all'
 
 %% ========================================================================
 %  INITIALIZATION
@@ -332,7 +332,8 @@ if best_combo > 0
     fprintf('  ASR_WINDOW_CRITERION = %s;\n\n', rec_window);
     fprintf('Expected results:\n');
     fprintf('  - Average retention: %.1f%%\n', results.avg_retention(best_combo) * 100);
-    fprintf('  - Files passing ≥90%%: %d/%d (%.0f%%)\n', ...
+    fprintf('  - Files passing ≥%.0f%%: %d/%d (%.0f%%)\n', ...
+        TARGET_RETENTION * 100, ...
         results.files_passing(best_combo), num_files, ...
         results.files_passing(best_combo)/num_files * 100);
     fprintf('  - Average SNR improvement: %.1f dB\n', results.avg_snr(best_combo));

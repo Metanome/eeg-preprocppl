@@ -34,7 +34,7 @@ BRAIN_THRESHOLD = 0.7;               % ICLabel: min brain probability to keep co
 
 %% ASR (ARTIFACT SUBSPACE RECONSTRUCTION) PARAMETERS
 % =================================
-ASR_BURST_CRITERION = 20;            % Threshold for ASR burst removal (lower = more aggressive)
+ASR_BURST_CRITERION = 23;            % Threshold for ASR burst removal (lower = more aggressive)
 ASR_WINDOW_CRITERION = 0.25;         % Proportion of bad channels to trigger window rejection
 ASR_WINDOW_TOLERANCES = [-Inf 7];    % Tolerance range for window rejection
 
